@@ -1,0 +1,14 @@
+{
+  "relays": [
+    {
+      "name": "Relay-1-Main",
+      "peerId": "12D3KooWLn647zN9HazPVgh6QQqbdckuXyMN5DafYmFCbBNHbbFg",
+      "address": "/ip4/38.180.0.13/tcp/15002/ws"
+    },
+    {
+      "name": "Relay-2-Backup",
+      "peerId": "12D3KooWJRcBbBUGG796f1vbNrXwUhKHuL4D96quu2oPMSU4krob",
+      "address": "/ip4/62.109.15.216/tcp/15002/ws"
+    }
+  ]
+}

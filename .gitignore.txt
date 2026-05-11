@@ -1,0 +1,7 @@
+node_modules/
+npm-debug.log*
+.env
+# Если сервер генерирует Peer ID в файл
+peer-id.json
+# Если используешь Docker
+.dockerignore
