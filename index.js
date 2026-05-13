@@ -13,15 +13,55 @@ import { peerIdFromString } from '@libp2p/peer-id'
 
 // === [ СЕКЦИЯ КОНФИГУРАЦИИ ] ===
 
-const REMOTE_BOOTSTRAP_ADDR = '/ip4/62.109.15.216/tcp/15002/ws/p2p/12D3KooWJRcBbBUGG796f1vbNrXwUhKHuL4D96quu2oPMSU4krob' 
+const MY_PUBLIC_IP = process.env.MY_PUBLIC_IP
 
-const MY_PUBLIC_IP = '38.180.0.13' // Твой внешний IP
+if (!MY_PUBLIC_IP) {
+  console.error('❌ ОШИБКА: Не задана переменная MY_PUBLIC_IP!');
+  console.error('👉 Запуск: MY_PUBLIC_IP="1.2.3.4" node index.js');
+  process.exit(1);
+}
+
 const DATA_DIR = './data'
 const ROOMS_FILE = './subscribed-rooms.json'
 
 const SYNC_REQUEST_TOPIC = 'rooms:sync:request'
 const SYNC_RESPONSE_TOPIC_BASE = 'rooms:sync:response:'
 const ANNOUNCE_TOPIC = 'rooms:announce'
+
+const KNOWN_PEERS_FILE = './data/known-peers.json'
+
+let bootstrapList = []
+let directPeersList = []
+
+// 1. Сначала проверяем переменную окружения (высокий приоритет)
+if (process.env.BOOTSTRAP_LIST) {
+  bootstrapList = process.env.BOOTSTRAP_LIST.split(',').map(s => s.trim()).filter(Boolean)
+}
+// 2. Если пуста — парсим твой файл known-peers.json
+else if (existsSync(KNOWN_PEERS_FILE)) {
+  try {
+    const config = JSON.parse(readFileSync(KNOWN_PEERS_FILE, 'utf-8'))
+    
+    if (config.relays && Array.isArray(config.relays)) {
+      config.relays.forEach(relay => {
+        // Пропускаем самого себя, чтобы не пытаться соединиться с собой по внешнему IP
+        if (MY_PUBLIC_IP && relay.address.includes(MY_PUBLIC_IP)) return
+
+        const fullAddr = `${relay.address}/p2p/${relay.peerId}`
+        bootstrapList.push(fullAddr)
+
+        directPeersList.push({
+          id: peerIdFromString(relay.peerId),
+          addrs: [multiaddr(relay.address)]
+        })
+      })
+      console.log(`📂 Загружено соседей из файла: ${bootstrapList.length}`)
+    }
+  } catch (e) {
+    console.error('❌ Ошибка парсинга known-peers.json:', e.message)
+  }
+}
+
 // ===============================
 
 const datastore = new FsDatastore(DATA_DIR)
@@ -40,9 +80,7 @@ const heliaInstance = await createHelia({
       denyOutboundConnection: () => false,
     },
     streamMuxers: [yamux()],
-    peerDiscovery: [
-      bootstrap({ list: [REMOTE_BOOTSTRAP_ADDR] })
-    ],
+    peerDiscovery: bootstrapList.length > 0 ? [bootstrap({ list: bootstrapList })] : [],
     services: {
       identify: identify(),
       pubsub: gossipsub({
@@ -55,12 +93,7 @@ const heliaInstance = await createHelia({
             Dhi: 5,
             Dscore: 1,
             heartbeatInterval: 1000,
-              directPeers: [
-                  {
-                  id: peerIdFromString('12D3KooWJRcBbBUGG796f1vbNrXwUhKHuL4D96quu2oPMSU4krob'), // ID Сервера 2
-                    addrs: [multiaddr('/ip4/62.109.15.216/tcp/15002/ws')]
-                }
-              ],
+            directPeers: directPeersList,
            // ✅ Отключение скоринга (браузеры не должны пессимизироваться)
             scoreThresholds: {
               gossipThreshold: -Infinity,
@@ -233,11 +266,13 @@ node.addEventListener('peer:connect', async (evt) => {
 
 // 4. План Б: Форсированный коннект
 setInterval(async () => {
-  if (node.getPeers().length === 0) {
+  if (node.getPeers().length === 0 && bootstrapList.length > 0) {
     try {
-      await node.dial(multiaddr(REMOTE_BOOTSTRAP_ADDR))
+      await node.dial(multiaddr(bootstrapList))
       console.log('🛠 [MAINTENANCE] Форсированный dial к соседу...')
-    } catch (e) {}
+    } catch (e) {
+      console.log('🛠 [MAINTENANCE] Не удалось подключиться к соседу:', e.message)
+    }
   }
 }, 15000)
 
