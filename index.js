@@ -23,12 +23,16 @@ if (!MY_PUBLIC_IP) {
 
 const DATA_DIR = './data'
 const ROOMS_FILE = './subscribed-rooms.json'
+const KNOWN_PEERS_FILE = './data/known-peers.json'
 
 const SYNC_REQUEST_TOPIC = 'rooms:sync:request'
 const SYNC_RESPONSE_TOPIC_BASE = 'rooms:sync:response:'
 const ANNOUNCE_TOPIC = 'rooms:announce'
+const PEER_SYNC_REQUEST_TOPIC = 'peers:sync:request'
+const PEER_SYNC_RESPONSE_TOPIC_BASE = 'peers:sync:response:'
+// Добавим имя ноды для обмена (опционально)
+const NODE_NAME = process.env.NODE_NAME || `Node-${MY_PUBLIC_IP.split('.').pop()}`
 
-const KNOWN_PEERS_FILE = './data/known-peers.json'
 
 let bootstrapList = []
 let directPeersList = []
@@ -186,6 +190,37 @@ const generalMessageHandler = async (evt) => {
       console.log(`📤 [SYNC] Отправлен список (${rooms.length} комнат) пиру ${target.slice(-6)}`)
     } catch (e) {}
   }
+
+// --- ОБМЕН СПИСКОМ УЗЛОВ (KNOWN PEERS) ---
+  if (topic === PEER_SYNC_REQUEST_TOPIC) {
+    try {
+      const payload = JSON.parse(text)
+      const target = payload?.from
+      if (!target || target === node.peerId.toString()) return
+
+      // 1. Если прислали данные о новом релее - сохраняем себе
+      if (payload.relay) {
+        const current = JSON.parse(readFileSync(KNOWN_PEERS_FILE, 'utf-8'))
+        const exists = current.relays.find(r => r.peerId === payload.relay.peerId)
+      
+        if (!exists) {
+          current.relays.push(payload.relay)
+          writeFileSync(KNOWN_PEERS_FILE, JSON.stringify(current, null, 2))
+          console.log(`🆕 [PEER-SYNC] Добавлен новый узел: ${payload.relay.name}`)
+        }
+      }
+
+      // 2. Отправляем в ответ весь наш файл known-peers.json
+      const config = JSON.parse(readFileSync(KNOWN_PEERS_FILE, 'utf-8'))
+      const responseTopic = `${PEER_SYNC_RESPONSE_TOPIC_BASE}${target}`
+    
+      await pubsub.publish(responseTopic, new TextEncoder().encode(JSON.stringify({ relays: config.relays })))
+      console.log(`📤 [PEER-SYNC] Отправлен список пиров для ${target.slice(-6)}`)
+    } catch (e) {
+      console.error('❌ Ошибка в PEER_SYNC_REQUEST:', e.message)
+    }
+  }
+
 }
 pubsub.addEventListener('message', generalMessageHandler)
 
@@ -221,6 +256,57 @@ async function requestSyncViaPubSub(timeoutMs = 7000) {
   return received
 }
 
+async function requestPeerSync(timeoutMs = 5000) {
+  const myPeerId = node.peerId.toString()
+  const responseTopic = `${PEER_SYNC_RESPONSE_TOPIC_BASE}${myPeerId}`
+  let received = false
+
+  const onResponse = async (evt) => {
+    const msg = evt.detail || evt
+    if (msg.topic !== responseTopic) return
+    try {
+      const payload = JSON.parse(new TextDecoder().decode(msg.data))
+      if (payload?.relays) {
+        const localConfig = JSON.parse(readFileSync(KNOWN_PEERS_FILE, 'utf-8'))
+        // Сливаем списки без дублей
+        payload.relays.forEach(remoteRelay => {
+          if (!localConfig.relays.find(r => r.peerId === remoteRelay.peerId)) {
+            localConfig.relays.push(remoteRelay)
+
+            // Сразу пробуем подключиться к новому знакомому
+            const fullAddr = `${remoteRelay.address}/p2p/${remoteRelay.peerId}`
+            node.dial(multiaddr(fullAddr)).catch(err => {
+            console.log(`📡 Не удалось сразу достучаться до ${remoteRelay.name}: ${err.message}`)
+            })
+          }
+        })
+        writeFileSync(KNOWN_PEERS_FILE, JSON.stringify(localConfig, null, 2))
+        console.log(`📥 [PEER-SYNC] Список узлов обновлен. Всего: ${localConfig.relays.length}`)
+        received = true
+      }
+    } catch (e) {}
+  }
+
+  await pubsub.subscribe(responseTopic)
+  pubsub.addEventListener('message', onResponse)
+
+  // Публикуем запрос + свои данные, чтобы другие нас узнали
+  const reqPayload = JSON.stringify({ 
+    from: myPeerId,
+    relay: {
+      name: NODE_NAME,
+      peerId: myPeerId,
+      address: `/ip4/${MY_PUBLIC_IP}/tcp/15002/ws`
+    }
+  })
+  
+  await pubsub.publish(PEER_SYNC_REQUEST_TOPIC, new TextEncoder().encode(reqPayload))
+
+  await new Promise(r => setTimeout(r, timeoutMs))
+  pubsub.removeEventListener('message', onResponse)
+  return received
+}
+
 // --- [ СТАРТ И ВОССТАНОВЛЕНИЕ ] ---
 
 function loadStoredRooms() {
@@ -236,8 +322,11 @@ function loadStoredRooms() {
 // 1. Подписываемся на базу
 await pubsub.subscribe(ANNOUNCE_TOPIC)
 await pubsub.subscribe(SYNC_REQUEST_TOPIC)
+await pubsub.subscribe(PEER_SYNC_REQUEST_TOPIC)
+// Добавляем в реестр
 subscribedTopics.add(ANNOUNCE_TOPIC)
 subscribedTopics.add(SYNC_REQUEST_TOPIC)
+subscribedTopics.add(PEER_SYNC_REQUEST_TOPIC)
 
 // 2. Восстанавливаем старое
 const saved = loadStoredRooms()
@@ -254,6 +343,10 @@ node.addEventListener('peer:connect', async (evt) => {
   if (!syncCompleted) {
     // Небольшая задержка, чтобы протоколы успели обменяться IDENTIFY
     await new Promise(r => setTimeout(r, 2000))
+
+    console.log('🔄 [SYNC] Начинаю синхронизацию пиров...')
+    await requestPeerSync()
+
     const ok = await requestSyncViaPubSub()
     if (ok) {
       syncCompleted = true
