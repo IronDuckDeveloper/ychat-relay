@@ -128,6 +128,34 @@ const pubsub = node.services.pubsub
 const subscribedTopics = new Set()
 let syncCompleted = false
 
+// === [ ЛОГИКА ПРЯМОГО АНОНСА ] ===
+await node.handle('/p2p-relay/v1/announce', async ({ stream }) => {
+  try {
+    // Используем it-pipe для чтения потока, так как это надежнее в новых версиях libp2p
+    const { pipe } = await import('it-pipe')
+    await pipe(
+      stream,
+      async function (source) {
+        for await (const buf of source) {
+          const decoded = new TextDecoder().decode(buf.subarray())
+          try {
+            const roomName = JSON.parse(decoded)
+            if (roomName && typeof roomName === 'string') {
+              console.log(`🏠 [Protocol] Прямой запрос подписки на: ${roomName}`)
+              await safeSubscribe(roomName) // Используем твою функцию safeSubscribe
+            }
+          } catch (e) {
+            // Если пришла просто строка, а не JSON
+            await safeSubscribe(decoded)
+          }
+        }
+      }
+    )
+  } catch (err) {
+    console.error(`❌ [Protocol] Ошибка стрима: ${err.message}`)
+  }
+})
+
 // --- [ ЛОГИКА ПОДПИСОК И СООБЩЕНИЙ ] ---
 
 async function safeSubscribe(room) {
@@ -319,14 +347,10 @@ function loadStoredRooms() {
   return []
 }
 
-// 1. Подписываемся на базу
-await pubsub.subscribe(ANNOUNCE_TOPIC)
-await pubsub.subscribe(SYNC_REQUEST_TOPIC)
-await pubsub.subscribe(PEER_SYNC_REQUEST_TOPIC)
-// Добавляем в реестр
-subscribedTopics.add(ANNOUNCE_TOPIC)
-subscribedTopics.add(SYNC_REQUEST_TOPIC)
-subscribedTopics.add(PEER_SYNC_REQUEST_TOPIC)
+// 1. Подписываемся на базу и Добавляем в реестр
+safeSubscribe(ANNOUNCE_TOPIC)
+safeSubscribe(SYNC_REQUEST_TOPIC)
+safeSubscribe(PEER_SYNC_REQUEST_TOPIC)
 
 // 2. Восстанавливаем старое
 const saved = loadStoredRooms()
