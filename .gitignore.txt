@@ -5,3 +5,4 @@ npm-debug.log*
 peer-id.json
 # Если используешь Docker
 .dockerignore
+deploy.sh
