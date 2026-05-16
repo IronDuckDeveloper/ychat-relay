@@ -54,7 +54,7 @@ export function setupPubSubHandlers(node, pubsub) {
     }
 
     // 4. Запрос обмена пирами (Known Peers)
-    if (topic === CONFIG.TOPICS.PEER_SYNC_REQUEST) {
+if (topic === CONFIG.TOPICS.PEER_SYNC_REQUEST) {
       try {
         const payload = JSON.parse(text);
         const target = payload?.from;
@@ -62,8 +62,26 @@ export function setupPubSubHandlers(node, pubsub) {
 
         if (payload.relay) {
           const current = loadKnownPeersConfig();
-          const exists = current.relays.find(r => r.peerId === payload.relay.peerId);
-          if (!exists) {
+          
+          // Ищем дубликат: совпадает либо PeerID, либо IP-адрес
+          const existingIndex = current.relays.findIndex(r => 
+            r.peerId === payload.relay.peerId || r.address === payload.relay.address
+          );
+
+          if (existingIndex !== -1) {
+            // Узел найден. Проверяем, изменились ли данные
+            const existing = current.relays[existingIndex];
+            if (existing.peerId !== payload.relay.peerId || 
+                existing.address !== payload.relay.address || 
+                existing.name !== payload.relay.name) {
+              
+              // Перезаписываем устаревшую запись актуальными данными
+              current.relays[existingIndex] = payload.relay;
+              saveKnownPeersConfig(current);
+              console.log(`🔄 [PEER-SYNC] Обновлены данные узла: ${payload.relay.name}`);
+            }
+          } else {
+            // Узла нет в списке, добавляем как новый
             current.relays.push(payload.relay);
             saveKnownPeersConfig(current);
             console.log(`🆕 [PEER-SYNC] Добавлен новый узел: ${payload.relay.name}`);
