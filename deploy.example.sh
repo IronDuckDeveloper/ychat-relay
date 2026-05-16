@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Папки, которые МЫ ИГНОРИРУЕМ (аналог секции ignore в SFTP)
-EXCLUDES="--exclude=node_modules --exclude=data --exclude=.git --exclude=.vscode --exclude=deploy.sh"
+EXCLUDES="--exclude=node_modules --exclude=data --exclude=.git --exclude=.vscode --exclude=deploy.sh --exclude=deploy.example.sh"
 
 echo "🚀 Начинаем деплой на кластер ychat..."
 
