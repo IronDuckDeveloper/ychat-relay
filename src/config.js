@@ -9,15 +9,19 @@ if (!MY_PUBLIC_IP) {
 export const CONFIG = {
   MY_PUBLIC_IP,
   NODE_NAME: process.env.NODE_NAME || `Node-${MY_PUBLIC_IP.split('.').pop()}`,
+  ORBITDB_DIR: './data/orbitdb',
+  ORBITDB_BLOCKS_DIR: './data/blocks.level',
   DATA_DIR: './data',
-  ROOMS_FILE: './subscribed-rooms.json',
   KNOWN_PEERS_FILE: './data/known-peers.json',
   
+  
   TOPICS: {
-    SYNC_REQUEST: 'rooms:sync:request',
-    SYNC_RESPONSE_BASE: 'rooms:sync:response:',
     ANNOUNCE: 'rooms:announce',
     PEER_SYNC_REQUEST: 'peers:sync:request',
-    PEER_SYNC_RESPONSE_BASE: 'peers:sync:response:'
+    PEER_SYNC_RESPONSE_BASE: 'peers:sync:response:',
+    ARCHIVIST: 'system-archivist' // Для запросов на хранение баз
+  },
+  ARCHIVIST: {
+    INACTIVITY_TIMEOUT_MS: 90 * 24 * 60 * 60 * 1000 // 3 месяца (90 дней)
   }
 };

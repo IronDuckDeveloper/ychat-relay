@@ -22,34 +22,21 @@ export function setupPubSubHandlers(node, pubsub) {
     let text = '';
     try { text = new TextDecoder().decode(data); } catch (e) { return; }
 
+    if (topic.includes('/orbitdb/')) {
+      console.log(`📩 [${topic}] Скрытое сообщение от ${from.toString().slice(-6)}: ${text}`);
+        return;
+    }
     // 1. Обычные сообщения (чат)
     if (topic !== CONFIG.TOPICS.ANNOUNCE && !topic.includes('sync')) {
       console.log(`📩 [${topic}] Сообщение от ${from.toString().slice(-6)}: ${text}`);
       return;
-    }
+    }``
 
     // 2. Анонсы комнат от браузеров
     if (topic === CONFIG.TOPICS.ANNOUNCE) {
       try {
         const { room } = JSON.parse(text);
         if (room) await safeSubscribe(pubsub, room);
-      } catch (e) {}
-    }
-
-    // 3. Запрос списка комнат (Синхронизация)
-    if (topic === CONFIG.TOPICS.SYNC_REQUEST) {
-      try {
-        const payload = JSON.parse(text);
-        const target = payload?.from;
-        if (!target || target === node.peerId.toString()) return;
-
-        const rooms = Array.from(subscribedTopics).filter(t => 
-          t !== CONFIG.TOPICS.ANNOUNCE && !t.includes('sync')
-        );
-        const responseTopic = `${CONFIG.TOPICS.SYNC_RESPONSE_BASE}${target}`;
-        
-        await pubsub.publish(responseTopic, new TextEncoder().encode(JSON.stringify({ rooms })));
-        console.log(`📤 [SYNC] Отправлен список (${rooms.length} комнат) пиру ${target.slice(-6)}`);
       } catch (e) {}
     }
 
@@ -99,37 +86,6 @@ if (topic === CONFIG.TOPICS.PEER_SYNC_REQUEST) {
   });
 }
 
-export async function requestSyncViaPubSub(node, pubsub) {
-  const myPeerId = node.peerId.toString();
-  const responseTopic = `${CONFIG.TOPICS.SYNC_RESPONSE_BASE}${myPeerId}`;
-  let received = false;
-
-  const onResponse = async (evt) => {
-    const msg = evt.detail || evt;
-    if (msg.topic !== responseTopic) return;
-    try {
-      const payload = JSON.parse(new TextDecoder().decode(msg.data));
-      if (payload?.rooms) {
-        console.log(`📥 [SYNC] Получено комнат: ${payload.rooms.length}`);
-        for (const room of payload.rooms) {
-          await safeSubscribe(pubsub, room);
-        }
-        received = true;
-      }
-    } catch (e) {}
-  };
-
-  await pubsub.subscribe(responseTopic);
-  pubsub.addEventListener('message', onResponse);
-
-  console.log('📢 [SYNC] Запрашиваю список комнат у соседей...');
-  await pubsub.publish(CONFIG.TOPICS.SYNC_REQUEST, new TextEncoder().encode(JSON.stringify({ from: myPeerId })));
-
-  await new Promise(r => setTimeout(r, 7000));
-  pubsub.removeEventListener('message', onResponse);
-  return received;
-}
-
 export async function requestPeerSync(node, pubsub) {
   const myPeerId = node.peerId.toString();
   const responseTopic = `${CONFIG.TOPICS.PEER_SYNC_RESPONSE_BASE}${myPeerId}`;
@@ -169,8 +125,13 @@ export async function requestPeerSync(node, pubsub) {
       address: `/ip4/${CONFIG.MY_PUBLIC_IP}/tcp/15002/ws`
     }
   });
-  
+
+  try {
   await pubsub.publish(CONFIG.TOPICS.PEER_SYNC_REQUEST, new TextEncoder().encode(reqPayload));
+} catch (err) {
+  if (err.message !== 'PublishError.InsufficientPeers') throw err;
+}
+  
 
   await new Promise(r => setTimeout(r, 5000));
   pubsub.removeEventListener('message', onResponse);
