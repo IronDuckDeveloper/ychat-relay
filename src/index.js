@@ -103,7 +103,7 @@ const pendingRequests = new Map();
   setupPubSubHandlers(node, pubsub);
 
   // 4. Прямой анонс через кастомный протокол (/p2p-relay/v1/announce)
-  await node.handle('/p2p-relay/v1/announce', async ({ stream }) => {
+  await node.handle(CONFIG.TOPICS.ANNOUNCE, async ({ stream }) => {
     const remotePeerId = stream.remotePeer;
     try {
       const { pipe } = await import('it-pipe');
@@ -144,20 +144,7 @@ const pendingRequests = new Map();
   });
 
   // 5. Подписка на системные топики управления
-  await safeSubscribe(pubsub, CONFIG.TOPICS.ANNOUNCE);
   await safeSubscribe(pubsub, CONFIG.TOPICS.PEER_SYNC_REQUEST);
-  
-  if (CONFIG.TOPICS.ARCHIVIST) {
-    await safeSubscribe(pubsub, CONFIG.TOPICS.ARCHIVIST);
-    
-    pubsub.addEventListener('message', async (evt) => {
-      if (evt.detail.topic === CONFIG.TOPICS.ARCHIVIST) {
-        const address = new TextDecoder().decode(evt.detail.data).trim();
-        console.log(`📡 [PubSub System] Получен системный запрос на пиннинг: ${address}`);
-        archivist.pinRoom(address);
-      }
-    });
-  }
 
   console.log('🔗 PeerID:', node.peerId.toString());
   console.log('🚀 SERVER READY (ARCHIVIST MODE)');

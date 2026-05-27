@@ -26,21 +26,13 @@ export function setupPubSubHandlers(node, pubsub) {
       console.log(`📩 [${topic}] Скрытое сообщение от ${from.toString().slice(-6)}: ${text}`);
         return;
     }
-    // 1. Обычные сообщения (чат)
-    if (topic !== CONFIG.TOPICS.ANNOUNCE && !topic.includes('sync')) {
+    // Обычные сообщения (чат)
+    if (!topic.includes('sync')) {
       console.log(`📩 [${topic}] Сообщение от ${from.toString().slice(-6)}: ${text}`);
       return;
-    }``
-
-    // 2. Анонсы комнат от браузеров
-    if (topic === CONFIG.TOPICS.ANNOUNCE) {
-      try {
-        const { room } = JSON.parse(text);
-        if (room) await safeSubscribe(pubsub, room);
-      } catch (e) {}
     }
 
-    // 4. Запрос обмена пирами (Known Peers)
+    // Запрос обмена пирами (Known Peers)
 if (topic === CONFIG.TOPICS.PEER_SYNC_REQUEST) {
       try {
         const payload = JSON.parse(text);

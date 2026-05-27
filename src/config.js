@@ -16,12 +16,11 @@ export const CONFIG = {
   
   
   TOPICS: {
-    ANNOUNCE: 'rooms:announce',
+    ANNOUNCE: '/p2p-relay/v1/announce',
     PEER_SYNC_REQUEST: 'peers:sync:request',
     PEER_SYNC_RESPONSE_BASE: 'peers:sync:response:',
-    ARCHIVIST: 'system-archivist' // Для запросов на хранение баз
   },
   ARCHIVIST: {
-    INACTIVITY_TIMEOUT_MS: 90 * 24 * 60 * 60 * 1000 // 3 месяца (90 дней)
+    INACTIVITY_TIMEOUT_MS: 90 * 24 * 60 * 60 * 1000 // 3 месяца (90 дней) //ПОКА НЕ ИСПОЛЬЗУЕТСЯ
   }
 };
