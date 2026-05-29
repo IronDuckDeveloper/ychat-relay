@@ -21,6 +21,6 @@ export const CONFIG = {
     PEER_SYNC_RESPONSE_BASE: 'peers:sync:response:',
   },
   ARCHIVIST: {
-    INACTIVITY_TIMEOUT_MS: 90 * 24 * 60 * 60 * 1000 // 3 месяца (90 дней) //ПОКА НЕ ИСПОЛЬЗУЕТСЯ
+    INACTIVITY_TIMEOUT_MS: 20 * 60 * 1000 // 20 минут
   }
 };

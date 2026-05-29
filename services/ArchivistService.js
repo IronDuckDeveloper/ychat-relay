@@ -1,5 +1,6 @@
 import { bootstrap } from '@libp2p/bootstrap';
 import { createOrbitDB, OrbitDBAccessController } from '@orbitdb/core';
+import { CONFIG } from '../src/config.js';
 
 export class ArchivistService {
   /**
@@ -57,9 +58,7 @@ async pinRoom(roomAddress, requesterPeerId = null) {
           console.log(`✅ Успешно открыта: ${roomAddress}`);
           // Принудительная репликация при каждом обновлении
       db.events.on('update', async (entry) => {
-        console.log(`[UPDATE] ${roomAddress.slice(-12)}`);
-        this.updateRoomTimer(roomAddress);
-        
+        console.log(`[UPDATE] ${roomAddress.slice(-12)}`);        
         // Форсируем распространение
         try {
           await db.replicate();
@@ -108,8 +107,6 @@ async pinRoom(roomAddress, requesterPeerId = null) {
         }
         console.error(`[OrbitDB Error] ${roomAddress.slice(-12)}:`, err.message);
       });
-
-      this.updateRoomTimer(roomAddress);
       
       return db;
     } catch (error) {
@@ -125,35 +122,24 @@ async pinRoom(roomAddress, requesterPeerId = null) {
 }
 
   // Логика обновления/сброса таймера
-  updateRoomTimer(roomAddress) {
-    // НА БУДУЩЕЕ: Раскомментировать, когда проект разрастется и сервер начнет страдать от нехватки места
-    /*
-    if (this.roomTimers.has(roomAddress)) {
-        clearTimeout(this.roomTimers.get(roomAddress));
-    }
+  startDestructionTimer(roomAddress) {
+  if (this.roomTimers.has(roomAddress)) return; // Таймер уже тикает, не трогаем
 
-    const timer = setTimeout(async () => {
-        console.log(`[Архивариус] Комната ${roomAddress} неактивна. Останавливаем пиннинг и освобождаем память.`);
-        
-        const db = this.activeRooms.get(roomAddress);
-        if (db) {
-            try {
-                await db.close(); // Закрываем соединение с БД
-            } catch (err) {
-                console.error(`[Архивариус] Ошибка при закрытии БД ${roomAddress}:`, err);
-            }
-            this.activeRooms.delete(roomAddress);
-        }
-        this.roomTimers.delete(roomAddress);
-        
-    }, this.timeoutMs);
-
-    this.roomTimers.set(roomAddress, timer);
-    */
+  console.log(`⏳ [Архивариус] Комната ${roomAddress.slice(-12)} пуста. Запуск таймера очистки (20 мин)...`);
+  
+  const timer = setTimeout(async () => {
+    console.log(`🛑 [Архивариус] Время вышло. Закрываем БД ${roomAddress.slice(-12)}`);
     
-    // Пока просто логируем для отладки, что активность зафиксирована
-    // console.log(`[Архивариус] [Таймер] Активность в комнате ${roomAddress} зафиксирована (таймер отключен).`);
-  }
+    const db = this.activeRooms.get(roomAddress);
+    if (db) {
+      await db.close();
+      this.activeRooms.delete(roomAddress);
+    }
+    this.roomTimers.delete(roomAddress);
+  }, CONFIG.ARCHIVIST.INACTIVITY_TIMEOUT_MS);
+
+  this.roomTimers.set(roomAddress, timer);
+}
 
   // Какие комнаты сейчас на пиннинге
   getPinnedRooms() {

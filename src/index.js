@@ -66,7 +66,7 @@ const pendingRequests = new Map();
     // Настройки хранилища без внешних роутеров
     }
   });
-  const timeoutMs = CONFIG.ARCHIVIST_TIMEOUT || 90 * 24 * 60 * 60 * 1000;
+  const timeoutMs = CONFIG.INACTIVITY_TIMEOUT_MS || 20 * 60 * 1000;
   const archivist = new ArchivistService(heliaInstance,orbitdb, timeoutMs);
 
   // ==========================================
@@ -165,22 +165,58 @@ const pendingRequests = new Map();
   });
 
   // 8. Поддержание топологии сети (Форсированный коннект к бутстрапам)
-  intervalTopology = setInterval(async () => {
-    if (node.getPeers().length === 0 && bootstrapList.length > 0) {
-      try {
-        await node.dial(multiaddr(bootstrapList));
-        console.log('🛠 [MAINTENANCE] Форсированный dial к соседу...');
-      } catch (e) {
-        // Тихо гасим ошибки подключения при отсутствии сети
+// Исправленный безопасный вариант:
+intervalTopology = setInterval(async () => {
+  if (node.getPeers().length === 0 && bootstrapList.length > 0) {
+    try {
+      // Берем первый адрес из списка соседей
+      const targetAddress = bootstrapList[0]; 
+      await node.dial(multiaddr(targetAddress));
+      console.log('🛠 [MAINTENANCE] Сеть упала до 0 пиров. Форсированный dial к соседу...');
+    } catch (e) {
+      // Тихо гасим ошибки, чтобы не спамить в консоль, если сосед тоже лежит
+    }
+  }
+}, 15000);
+
+ // 9. Мониторинг ресурсов и аптайма баз
+  intervalMonitor = setInterval(() => {
+    if (!archivist || !archivist.activeRooms) return; 
+
+    // Получаем список PeerID всех бутстрап-релеев, чтобы отсечь их
+    const bootstrapPeerIds = bootstrapList.map(addr => {
+      try { return multiaddr(addr).getPeerId(); } catch { return null; }
+    }).filter(Boolean);
+
+    for (const roomAddress of archivist.activeRooms.keys()) {
+      const allSubscribers = node.services.pubsub.getSubscribers(roomAddress); 
+
+      // Фильтруем: оставляем только тех, чьих PeerID НЕТ в списке бутстрап-соседей
+      const clientSubscribers = allSubscribers.filter(peer => 
+        !bootstrapPeerIds.includes(peer.toString())
+      );
+
+      // Теперь проверяем именно ЖИВЫХ КЛИЕНТОВ (браузеры)
+      if (clientSubscribers.length === 0) {
+        if (!archivist.roomTimers.has(roomAddress)) {
+          archivist.startDestructionTimer(roomAddress);
+        }
+      } else {
+        if (archivist.roomTimers.has(roomAddress)) {
+          clearTimeout(archivist.roomTimers.get(roomAddress));
+          archivist.roomTimers.delete(roomAddress);
+          console.log(`\n📈 [Архивариус] Клиенты вернулись в ${roomAddress.slice(-12)}. Таймер отменен.`);
+        }
       }
     }
-  }, 15000);
+    
+    // Сводный лог статуса
+    const totalPeers = node.getPeers().length;
+    const activeCount = archivist.activeRooms.size;
+    const timersCount = archivist.roomTimers.size;
+    console.log(`📊 Сеть: Пиров=${totalPeers} | Комнат=${activeCount} | На удаление⏳=${timersCount} | Синх=${syncCompleted ? '✅' : '⏳'}`);
 
-  // 9. Мониторинг ресурсов и аптайма баз
-  intervalMonitor = setInterval(() => {
-    const activeCount = archivist.getPinnedRooms().length;
-    console.log(`\n📊 Статус: Пиров: ${node.getPeers().length} | Активных БД на пине: ${activeCount} | Синх: ${syncCompleted ? '✅' : '⏳'}`);
-  }, 10000);
+  }, 15000); // 15 секунд — оптимальный интервал для теста
 }
 
 // Запуск приложения
