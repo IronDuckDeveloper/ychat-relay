@@ -3,20 +3,24 @@
   "version": "1.0.0",
   "type": "module",
   "dependencies": {
-    "@orbitdb/core": "^2.0.1",
-    "helia": "4.2.6",
-    "blockstore-level": "^1.1.7",
-    "datastore-fs": "^12.0.1",
-  
     "@chainsafe/libp2p-gossipsub": "11.2.1",
     "@chainsafe/libp2p-noise": "15.1.2",
     "@chainsafe/libp2p-yamux": "6.0.2",
-  
     "@libp2p/bootstrap": "10.1.5",
     "@libp2p/circuit-relay-v2": "1.1.5",
     "@libp2p/identify": "2.1.5",
     "@libp2p/kad-dht": "12.1.5",
-
-    "@multiformats/multiaddr": "^12.3.0"
+    "@libp2p/peer-id": "^6.0.10",
+    "@multiformats/multiaddr": "^12.3.0",
+    "@orbitdb/core": "^2.0.1",
+    "better-sqlite3": "^12.10.0",
+    "blockstore-level": "^1.1.7",
+    "datastore-fs": "^12.0.1",
+    "helia": "4.2.6",
+    "it-length-prefixed": "^11.0.1",
+    "it-pipe": "^3.0.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13"
   }
 }

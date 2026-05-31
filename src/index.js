@@ -8,21 +8,34 @@ import {
   setupPubSubHandlers, 
   requestPeerSync 
 } from './pubsub.js';
+import { initDatabase } from './networking/db.js';
+import { setupAntiFloodProtocol } from './networking/rpcHandler.js';
 
-// 🛡️ ГЛОБАЛЬНЫЙ ФИЛЬТР СПАМА ОТ ORBITDB
-process.on('unhandledRejection', (reason, promise) => {
-  if (reason) {
-    const errName = reason.name || '';
-    const errCode = reason.code || '';
-    
-    // Игнорируем штатные ошибки "не найдено", выпадающие из фоновых задач OrbitDB
-    if (errCode === 'ERR_NOT_FOUND' || errName === 'NotFoundError' || errName === 'AbortError') {
-      return; // Молча гасим
-    }
-  }
+// 🛡️ ГЛОБАЛЬНЫЙ ФИЛЬТР МУСОРА ОТ ORBITDB И P2P
+process.on('unhandledRejection', (reason) => {
+  const errName = reason?.name || '';
+  const errCode = reason?.code || '';
+  const msg = reason?.message || '';
+
+  // 1. Игнорируем ошибки отсутствия данных
+  if (errCode === 'ERR_NOT_FOUND' || errName === 'NotFoundError' || errName === 'AbortError') return;
   
-  // Все остальные реальные ошибки выводим как обычно
+  // 2. Игнорируем рассинхрон протоколов (наш ERR_UNSUPPORTED_PROTOCOL)
+  if (errCode === 'ERR_UNSUPPORTED_PROTOCOL' || msg.includes('protocol selection failed')) return;
+
+  // 3. Игнорируем обрывы связи при отключении клиентов
+  if (msg.includes('stream reset') || msg.includes('The operation was aborted') || msg.includes('unexpected end of input')) return;
+
+  // Все остальные реальные ошибки выводим
   console.error('❌ Неперехваченная ошибка промиса:', reason);
+});
+
+process.on('uncaughtException', (err) => {
+  if (err.name === 'StreamResetError' || err.code === 'ERR_STREAM_RESET') {
+    console.log('⚠️ [Network] Игнорируем обрыв P2P-стрима (клиент отключился)');
+    return;
+  }
+  console.error('🔥 КРИТИЧЕСКАЯ ОШИБКА:', err);
 });
 
 process.on('uncaughtException', (err) => {
@@ -36,26 +49,20 @@ process.on('uncaughtException', (err) => {
   console.error('🔥 КРИТИЧЕСКАЯ ОШИБКА:', err);
 });
 
-process.on('unhandledRejection', (reason) => {
-  const msg = reason?.message || '';
-  if (msg.includes('stream reset') || msg.includes('The operation was aborted') || msg.includes('unexpected end of input')) {
-    // Тихо игнорируем типичный мусор от отключающихся пиров
-    return;
-  }
-  console.error('🔥 Необработанный отказ (Promise):', reason);
-});
-
 let intervalTopology;
 let intervalMonitor;
 
 async function main() {
+  // Сначала поднимаем базу данных
+  initDatabase();
   // 1. Инициализация сетевой ноды (Helia + libp2p)
   const { heliaInstance, bootstrapList } = await createRelayNode();
   const node = heliaInstance.libp2p;
   const pubsub = node.services.pubsub;
+  // Включаем защиту
+  setupAntiFloodProtocol(node);
 
-const pendingRequests = new Map();
-
+  const pendingRequests = new Map();
 
   // Инициализация OrbitDB и сервиса Архивариуса поверх Helia
   const orbitdb = await createOrbitDB({ 
@@ -117,22 +124,26 @@ const pendingRequests = new Map();
               const targetAddress = (typeof parsed === 'string') ? parsed : parsed.address;
               
               if (targetAddress) {
-                // Добавьте этот блок защиты (использует ваш Set 'pending')
                 const now = Date.now();
                 if (pendingRequests.has(targetAddress)) {
                   const lastSeen = pendingRequests.get(targetAddress);
-                  if (now - lastSeen < 60000) return; // Игнорируем запрос, если был за последние 60 сек
+                  if (now - lastSeen < 3000) return; 
                 }
 
                 pendingRequests.set(targetAddress, now);
 
                 console.log(`🏠 [Protocol] Запрос на архивацию БД: ${targetAddress}`);
-                archivist.pinRoom(targetAddress, remotePeerId);
+                
+                // ВАЖНО: Никаких await. База SQLite открывается в фоне,
+                // стрим мгновенно освобождается, клиент не блокируется.
+                archivist.pinRoom(targetAddress, remotePeerId).catch(err => {
+                  console.error('❌ Ошибка фонового открытия БД:', err);
+                });
               }
             } catch (e) {
               if (decoded) {
                 console.log(`🏠 [Protocol] Запрос на архивацию БД (raw): ${decoded}`);
-                archivist.pinRoom(decoded);
+                archivist.pinRoom(decoded).catch(err => console.error(err));
               }
             }
           }
