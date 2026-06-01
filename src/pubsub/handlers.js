@@ -1,19 +1,6 @@
 import { multiaddr } from '@multiformats/multiaddr';
-import { CONFIG } from './config.js';
-import { loadKnownPeersConfig, saveKnownPeersConfig } from './storage.js';
-
-export const subscribedTopics = new Set();
-
-export async function safeSubscribe(pubsub, room) {
-  if (!room || subscribedTopics.has(room)) return;
-  try {
-    await pubsub.subscribe(room);
-    subscribedTopics.add(room);
-    console.log(`🎯 [TOPIC] Подписан на: ${room}`);
-  } catch (e) {
-    console.error(`❌ Ошибка подписки на ${room}:`, e.message);
-  }
-}
+import { CONFIG } from '../config.js';
+import { loadKnownPeersConfig, saveKnownPeersConfig } from '../storage/peers-config.js';
 
 export function setupPubSubHandlers(node, pubsub) {
   pubsub.addEventListener('message', async (evt) => {

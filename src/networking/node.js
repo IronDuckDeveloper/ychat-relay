@@ -5,19 +5,18 @@ import { circuitRelayServer } from '@libp2p/circuit-relay-v2';
 import { noise } from '@chainsafe/libp2p-noise';
 import { yamux } from '@chainsafe/libp2p-yamux';
 import { LevelBlockstore } from 'blockstore-level';
-import { FsDatastore } from 'datastore-fs'
-import { MemoryDatastore } from 'datastore-core';
+import { FsDatastore } from 'datastore-fs';
 import { bootstrap } from '@libp2p/bootstrap';
 import { multiaddr } from '@multiformats/multiaddr';
 import { gossipsub } from '@chainsafe/libp2p-gossipsub';
 import { peerIdFromString } from '@libp2p/peer-id';
-import { CONFIG } from './config.js';
-import { loadKnownPeersConfig } from './storage.js';
-import { ping } from '@libp2p/ping'
+import { ping } from '@libp2p/ping';
 import { kadDHT } from '@libp2p/kad-dht';
-// import { delegatedHTTPRouting } from '@helia/routers';
 import { all } from '@libp2p/websockets/filters';
 import { bitswap } from '@helia/block-brokers';
+
+import { CONFIG } from '../config.js';
+import { loadKnownPeersConfig } from '../storage/peers-config.js';
 
 export async function createRelayNode() {
   let bootstrapList = [];
@@ -25,14 +24,11 @@ export async function createRelayNode() {
 
   // Загрузка пиров из ENV или файла
   if (process.env.BOOTSTRAP_LIST) {
-    // Проверяем переменную окружения 
     bootstrapList = process.env.BOOTSTRAP_LIST.split(',').map(s => s.trim()).filter(Boolean);
   } else {
-    // Если пуста — парсим файл known-peers.json
     const config = loadKnownPeersConfig();
     if (config.relays && Array.isArray(config.relays)) {
       config.relays.forEach(relay => {
-        // Пропускаем самого себя IP
         if (CONFIG.MY_PUBLIC_IP && relay.address.includes(CONFIG.MY_PUBLIC_IP)) return;
 
         bootstrapList.push(`${relay.address}/p2p/${relay.peerId}`);
@@ -45,9 +41,6 @@ export async function createRelayNode() {
     }
   }
 
-// Использование:
-  // const rawBlockstore = new LevelBlockstore(CONFIG.ORBITDB_BLOCKS_DIR);
-  // const blockstore = new CompatibleBlockstore(rawBlockstore);
   const datastore = new FsDatastore(CONFIG.DATA_DIR);
   const blockstore = new LevelBlockstore(CONFIG.ORBITDB_BLOCKS_DIR);
 
@@ -60,24 +53,16 @@ export async function createRelayNode() {
   const heliaInstance = await createHelia({
     blockstore: blockstore,
     datastore: datastore,
-    blockBrokers: [
-      bitswap() // <-- СЕРВЕРУ ТОЖЕ НУЖЕН BITSWAP, здесь ему самое место!
-    ],
-  //     routers: [
-  //   delegatedHTTPRouting('https://delegated-ipfs.dev'),
-  //   delegatedHTTPRouting('https://dht.ipfs.io')
-  // ],
+    blockBrokers: [bitswap()],
     libp2p: {
       addresses: {
         listen: ['/ip4/0.0.0.0/tcp/15002/ws'],
         announce: [`/ip4/${CONFIG.MY_PUBLIC_IP}/tcp/15002/ws`]
       },
-      transports: [webSockets({
-    filter: all // Разрешаем стучаться на любые IP-адреса (важно для тестов и локалки)
-  })],
+      transports: [webSockets({ filter: all })],
       connectionManager: {
-      autoDial: true,
-      dialTimeout: 30000 //  30 секунд для relay
+        autoDial: true,
+        dialTimeout: 30000
       },
       connectionEncrypters: [noise()],
       connectionGater: {
@@ -86,20 +71,11 @@ export async function createRelayNode() {
       streamMuxers: [yamux()],
       peerDiscovery: bootstrapList.length > 0 ? [bootstrap({ 
         list: bootstrapList,
-            timeout: 1000,
-      tagName: 'bootstrap',
-      tagValue: 50,
-      tagTTL: 120000
+        timeout: 1000,
+        tagName: 'bootstrap',
+        tagValue: 50,
+        tagTTL: 120000
       })] : [],
-      // Снабжаем Helia инструментами для поиска блоков в P2P-сети
-      // contentRouters: [
-      //   delegatedHTTPRouting('https://delegated-ipfs.dev'),
-      //   delegatedHTTPRouting('https://dht.ipfs.io')
-      // ],
-      // routers: ['https://delegated-ipfs.dev'],
-      // routing: [
-      //   delegatedHTTPRouting('https://delegated-ipfs.dev')
-      // ],
       services: {
         identify: identify(),
         pubsub: gossipsub({
@@ -130,10 +106,9 @@ export async function createRelayNode() {
           advertise: { enabled: true },
           hop: { enabled: true, timeout: 30000 }
         }),
-        // Включаем полноценный серверный DHT-режим для релея
         dht: kadDHT({
           clientMode: false,
-          kBucketSize: 20, // Сервер участвует в маршрутизации и хранит чужие записи
+          kBucketSize: 20,
           validators: {},
           selectors: {},
           allowPublishToZeroPeers: true
@@ -141,6 +116,29 @@ export async function createRelayNode() {
         ping: ping()
       }
     }
+  });
+
+  // ========================================================
+  // ПОДДЕРЖАНИЕ ТОПОЛОГИИ СЕТИ
+  // ========================================================
+  const node = heliaInstance.libp2p;
+
+  const intervalTopology = setInterval(async () => {
+    if (node.getPeers().length === 0 && bootstrapList.length > 0) {
+      // Умный перебор: пробуем подключиться к любому случайному из списка бутстрапов
+      const randomAddress = bootstrapList[Math.floor(Math.random() * bootstrapList.length)];
+      try {
+        await node.dial(multiaddr(randomAddress));
+        console.log(`🛠️  [MAINTENANCE] Сеть упала до 0 пиров. Успешный форсированный dial к ${randomAddress.slice(0, 30)}...`);
+      } catch (e) {
+        // Тихо гасим, если этот конкретный сосед лежит
+      }
+    }
+  }, 15000);
+
+  node.addEventListener('stop', () => {
+    clearInterval(intervalTopology);
+    console.log('📉 [Network] Интервал поддержки拓扑 остановлен.');
   });
 
   return { heliaInstance, bootstrapList };

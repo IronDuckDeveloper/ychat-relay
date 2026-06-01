@@ -1,6 +1,7 @@
 import { bootstrap } from '@libp2p/bootstrap';
 import { createOrbitDB, OrbitDBAccessController } from '@orbitdb/core';
 import { CONFIG } from '../src/config.js';
+import { multiaddr } from '@multiformats/multiaddr';
 
 export class ArchivistService {
   /**
@@ -8,15 +9,88 @@ export class ArchivistService {
    * @param {number} timeoutMs - Время неактивности в миллисекундах
    * @param {helia} helia - Экземпляр Helia
    */
-  constructor(helia, orbitdbInstance, timeoutMs) {
+  constructor(helia, orbitdbInstance, timeoutMs, node, bootstrapList) {
     this.helia = helia;
     this.orbitdb = orbitdbInstance;
+
     this.activeRooms = new Map();
     this.roomTimers = new Map();
-    this.timeoutMs = timeoutMs;
     this.openingPromises = new Map();
 
+    this.timeoutMs = timeoutMs;
+    this.node = node;
+    this.bootstrapList = bootstrapList || [];
+
+    this.monitorInterval = null;
+
     console.log('🛡️ ArchivistService инициализирован');
+  }
+
+  /**
+   * Запуск внутреннего цикла мониторинга ресурсов и аптайма баз
+   */
+  startMonitoring() {
+    if (this.monitorInterval) return;
+
+    this.monitorInterval = setInterval(() => {
+      if (!this.activeRooms) return;
+
+      // Получаем список PeerID всех бутстрап-релеев, чтобы отсечь их
+      const bootstrapPeerIds = this.bootstrapList.map(addr => {
+        try { 
+          return multiaddr(addr).getPeerId(); 
+        } catch { 
+          return null; 
+        }
+      }).filter(Boolean);
+
+      for (const roomAddress of this.activeRooms.keys()) {
+        // Запрашиваем подписчиков напрямую через переданный node
+        const allSubscribers = this.node.services.pubsub.getSubscribers(roomAddress);
+
+        // Фильтруем: оставляем только тех, чьих PeerID НЕТ в списке бутстрап-соседей
+        const clientSubscribers = allSubscribers.filter(peer => 
+          !bootstrapPeerIds.includes(peer.toString())
+        );
+
+        // Проверяем именно ЖИВЫХ КЛИЕНТОВ (браузеры)
+        if (clientSubscribers.length === 0) {
+          if (!this.roomTimers.has(roomAddress)) {
+            this.startDestructionTimer(roomAddress);
+          }
+        } else {
+          if (this.roomTimers.has(roomAddress)) {
+            clearTimeout(this.roomTimers.get(roomAddress));
+            this.roomTimers.delete(roomAddress);
+            console.log(`\n📈 [Архивариус] Клиенты вернулись в ${roomAddress.slice(-12)}. Таймер отменен.`);
+          }
+        }
+      }
+
+      // Сводный лог статуса
+      const totalPeers = this.node.getPeers().length;
+      const activeCount = this.activeRooms.size;
+      const timersCount = this.roomTimers.size;
+      
+      console.log(`📊 Сеть: Пиров=${totalPeers} | Комнат=${activeCount} | На удаление⏳=${timersCount}`);
+    }, 15000); // 15 секунд
+  }
+
+  /**
+   * Остановка мониторинга и очистка всех таймеров (для Graceful Shutdown)
+   */
+  stop() {
+    if (this.monitorInterval) {
+      clearInterval(this.monitorInterval);
+      this.monitorInterval = null;
+    }
+    
+    // Чистим все запущенные таймеры удаления комнат
+    for (const timer of this.roomTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.roomTimers.clear();
+    console.log('📉 [Архивариус] Интервал мониторинга ресурсов остановлен, таймеры очищены.');
   }
 
   // Метод для начала отслеживания комнаты

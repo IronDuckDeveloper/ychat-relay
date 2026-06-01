@@ -1,5 +1,5 @@
 import { writeFileSync, readFileSync, existsSync } from 'fs';
-import { CONFIG } from './config.js';
+import { CONFIG } from '../config.js';
 
 export function loadKnownPeersConfig() {
   if (existsSync(CONFIG.KNOWN_PEERS_FILE)) {

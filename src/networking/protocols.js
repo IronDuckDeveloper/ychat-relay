@@ -1,7 +1,7 @@
 // src/networking/rpcHandler.ts
 import * as lp from 'it-length-prefixed';
 import { pipe } from 'it-pipe';
-import { checkAndLogRegistration } from './db.js';
+import { checkAndLogRegistration } from '../database/db.js';
 import { CONFIG } from '../config.js';
 
 
@@ -60,4 +60,50 @@ export function setupAntiFloodProtocol(libp2p) {
       stream.close();
     }
   });
+}
+
+export async function registerAnnounceProtocol(node, archivist, pendingRequests) {
+    await node.handle(CONFIG.TOPICS.ANNOUNCE, async ({ stream }) => {
+      const remotePeerId = stream.remotePeer;
+      try {
+        const { pipe } = await import('it-pipe');
+        await pipe(
+          stream,
+          async function (source) {
+            for await (const buf of source) {
+              const decoded = new TextDecoder().decode(buf.subarray()).trim();
+              try {
+                const parsed = JSON.parse(decoded);
+                const targetAddress = (typeof parsed === 'string') ? parsed : parsed.address;
+                
+                if (targetAddress) {
+                  const now = Date.now();
+                  if (pendingRequests.has(targetAddress)) {
+                    const lastSeen = pendingRequests.get(targetAddress);
+                    if (now - lastSeen < CONFIG.DELAY_START_MS) return;  // Защита от спама
+                  }
+  
+                  pendingRequests.set(targetAddress, now);
+  
+                  console.log(`🏠 [Protocol] Запрос на архивацию БД: ${targetAddress}`);
+                  
+                  // ВАЖНО: Никаких await. База SQLite открывается в фоне,
+                  // стрим мгновенно освобождается, клиент не блокируется.
+                  archivist.pinRoom(targetAddress, remotePeerId).catch(err => {
+                    console.error('❌ Ошибка фонового открытия БД:', err);
+                  });
+                }
+              } catch (e) {
+                if (decoded) {
+                  console.log(`🏠 [Protocol] Запрос на архивацию БД (raw): ${decoded}`);
+                  archivist.pinRoom(decoded).catch(err => console.error(err));
+                }
+              }
+            }
+          }
+        );
+      } catch (err) {
+        console.error(`❌ [Protocol] Ошибка стрима: ${err.message}`);
+      }
+    });
 }
