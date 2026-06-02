@@ -20,7 +20,7 @@ export function setupPubSubHandlers(node, pubsub) {
     }
 
     // Запрос обмена пирами (Known Peers)
-if (topic === CONFIG.TOPICS.PEER_SYNC_REQUEST) {
+    if (topic === CONFIG.TOPICS.PEER_SYNC_REQUEST) {
       try {
         const payload = JSON.parse(text);
         const target = payload?.from;

@@ -7,14 +7,14 @@ import { CONFIG } from '../config.js';
 
 export function setupAntiFloodProtocol(libp2p) {
 
-  console.log(`📡 [libp2p] Регистрация кастомного протокола: ${CONFIG.TOPICS.PROTOCOL}`);
+  console.log(`📡 [libp2p] Регистрация кастомного протокола: ${CONFIG.TOPICS.RPC_PROTOCOL}`);
 
-  libp2p.handle(CONFIG.TOPICS.PROTOCOL, async ({ stream, connection }) => {
+  libp2p.handle(CONFIG.TOPICS.RPC_PROTOCOL, async ({ stream, connection }) => {
     try {
       // Читаем входящий поток данных от клиента
       await pipe(
         stream.source,
-        lp.decode(),
+        lp.decode,
         async function (source) {
           for await (const chunk of source) {
             // 1. Декодируем входящий JSON от клиента
@@ -23,6 +23,24 @@ export function setupAntiFloodProtocol(libp2p) {
             const clientIp = data.ipAddress;
 
             console.log(`📥 [RPC] Запрос верификации. Сетевой IP: ${clientIp}, FP: ${clientFingerprint?.slice(0, 10)}...`);
+
+            // ДОБАВЛЯЕМ ЗАЩИТУ ЗДЕСЬ
+            if (!clientIp || !clientFingerprint) {
+              console.warn('⚠️ [Protocol] Клиент прислал пустой IP или Fingerprint. Отклоняем.');
+              
+              const errorPayload = JSON.stringify({
+                status: CONFIG.MSG.FORBIDDEN,
+                message: "INVALID_PAYLOAD" // Или любое твое сообщение об ошибке
+              });
+
+              await pipe(
+                [new TextEncoder().encode(errorPayload)],
+                lp.encode,
+                stream.sink
+              );
+              
+              break; // Выходим, чтобы не дергать базу
+            }
 
             // 2. Проверяем по базе данных SQLite
             const isAllowed = checkAndLogRegistration(clientIp, clientFingerprint);
@@ -37,7 +55,7 @@ export function setupAntiFloodProtocol(libp2p) {
             try {
               await pipe(
                 [new TextEncoder().encode(responsePayload)],
-                lp.encode(),
+                lp.encode,
                 stream.sink
               );
             } catch (err) {

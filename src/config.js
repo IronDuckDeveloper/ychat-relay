@@ -35,7 +35,7 @@ export const CONFIG = {
     ANNOUNCE: '/p2p-relay/v1/announce', // Топик для объявления о себе
     PEER_SYNC_REQUEST: 'peers:sync:request', // Топик для запроса синхронизации пиров
     PEER_SYNC_RESPONSE_BASE: 'peers:sync:response:', // Базовый топик для ответа на синхронизацию пиров (добавляем ID запроса)
-    PROTOCOL: '/ychat/anti-flood/1.0.0' // Протокол для RPC-метода проверки регистрации (антифрод)
+    RPC_PROTOCOL: '/ychat/anti-flood/1.0.0' // Протокол для RPC-метода проверки регистрации (антифрод)
   },
 
   ARCHIVIST: {
