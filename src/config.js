@@ -21,8 +21,13 @@ export const CONFIG = {
   MSG: {
     SUCCESS : 'SUCCESS',
     FORBIDDEN : 'FORBIDDEN',
+    NOT_FOUND : 'NOT_FOUND',
+    INCORRECT_ACTION : 'INCORRECT_ACTION',
+    INCORRECT_ACTION_MSG : 'Incorrect action provided',
     REGISTRATION_IS_OVER : 'Registration allowed',
-    LIMIT_EXCEEDED : 'Registration limit per device/IP exceeded'
+    LIMIT_EXCEEDED : 'Registration limit per device/IP exceeded',
+    EMPTY_FINGERPRINT : 'Empty fingerprint provided',
+    PROFILE_NOT_FOUND : 'Profile not found. Please check that the seed phrase is correct.'
   },
 
   SQL: {

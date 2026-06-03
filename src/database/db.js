@@ -18,30 +18,28 @@ export function initDatabase() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       ip_address TEXT NOT NULL,
       device_hash TEXT NOT NULL,
+      profile_address TEXT,
       timestamp INTEGER NOT NULL
     )
   `).run();
 
-  // Создаем индексы для быстрого поиска по IP и хэшу устройства
+  // Создаем индексы для быстрого поиска
   db.prepare('CREATE INDEX IF NOT EXISTS idx_ip ON registration_logs(ip_address)').run();
   db.prepare('CREATE INDEX IF NOT EXISTS idx_device ON registration_logs(device_hash)').run();
+  db.prepare('CREATE INDEX IF NOT EXISTS idx_profile ON registration_logs(profile_address)').run();
 
   console.log('🗄️ [SQLite] База данных и индексы успешно инициализированы.');
 }
 
 /**
- * Проверяет лимиты и записывает лог новой регистрации
+ * Проверяет лимиты и записывает лог новой регистрации вместе с адресом профиля
  * @returns boolean — разрешить регистрацию или нет
  */
-/**
- * Проверяет лимиты и записывает лог новой регистрации
- * @returns boolean — разрешить регистрацию или нет
- */
-export function checkAndLogRegistration(ip, deviceHash) {
+export function checkAndLogRegistration(ip, deviceHash, profileAddress) {
   const now = Date.now();
-  const timeLimit = now - CONFIG.SQL.ONE_YEAR_MS; // 🔥 Теперь это будет работать правильно
+  const timeLimit = now - CONFIG.SQL.ONE_YEAR_MS;
 
-  // 1. Считаем количество регистраций за последний год по IP (передаем два параметра)
+  // 1. Считаем количество регистраций за последний год по IP
   const ipCountRow = db.prepare(
     'SELECT COUNT(*) as count FROM registration_logs WHERE ip_address = ? AND timestamp > ?'
   ).get(ip, timeLimit);
@@ -57,12 +55,31 @@ export function checkAndLogRegistration(ip, deviceHash) {
     return false;
   }
 
-  // 4. Если лимит не превышен — логируем успешную операцию
+  // 4. Логируем успешную операцию вместе с profileAddress
   const insert = db.prepare(
-    'INSERT INTO registration_logs (ip_address, device_hash, timestamp) VALUES (?, ?, ?)'
+    'INSERT INTO registration_logs (ip_address, device_hash, profile_address, timestamp) VALUES (?, ?, ?, ?)'
   );
-  insert.run(ip, deviceHash, now);
+  insert.run(ip, deviceHash, profileAddress, now);
 
-  console.log(`✅ [Anti-Fraud] Регистрация одобрена и залогирована. IP: ${ip}`);
+  console.log(`✅ [Anti-Fraud] Регистрация одобрена и залогирована. IP: ${ip}, Profile: ${profileAddress?.slice(0, 15)}...`);
   return true;
+}
+
+/**
+ * 🌟 НОВАЯ ФУНКЦИЯ: Проверяет, существует ли уже такой профиль в базе (для LOGIN)
+ * @param {string} profileAddress - Адрес OrbitDB базы данных профиля клиента
+ * @returns {boolean} - true, если профиль найден
+ */
+export function checkIfProfileExists(profileAddress) {
+  if (!profileAddress) return false;
+
+  try {
+    const stmt = db.prepare('SELECT COUNT(*) as count FROM registration_logs WHERE profile_address = ?');
+    const result = stmt.get(profileAddress);
+
+    return result.count > 0;
+  } catch (error) {
+    console.error('❌ [DB Error] Ошибка при проверке существования профиля:', error);
+    return false;
+  }
 }

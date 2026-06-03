@@ -1,12 +1,10 @@
 // src/networking/rpcHandler.ts
 import * as lp from 'it-length-prefixed';
 import { pipe } from 'it-pipe';
-import { checkAndLogRegistration } from '../database/db.js';
+import { checkAndLogRegistration, checkIfProfileExists } from '../database/db.js';
 import { CONFIG } from '../config.js';
 
-
 export function setupAntiFloodProtocol(libp2p) {
-
   console.log(`📡 [libp2p] Регистрация кастомного протокола: ${CONFIG.TOPICS.RPC_PROTOCOL}`);
 
   libp2p.handle(CONFIG.TOPICS.RPC_PROTOCOL, async ({ stream, connection }) => {
@@ -22,36 +20,71 @@ export function setupAntiFloodProtocol(libp2p) {
             const clientFingerprint = data.fingerprint;
             const clientIp = data.ipAddress;
 
-            console.log(`📥 [RPC] Запрос верификации. Сетевой IP: ${clientIp}, FP: ${clientFingerprint?.slice(0, 10)}...`);
+            console.log(`📥 [RPC] Запрос верификации. Действие: ${data.action}, Сетевой IP: ${clientIp}, FP: ${clientFingerprint?.slice(0, 10)}...`);
 
-            // ДОБАВЛЯЕМ ЗАЩИТУ ЗДЕСЬ
+            // Защита от пустых данных
             if (!clientIp || !clientFingerprint) {
               console.warn('⚠️ [Protocol] Клиент прислал пустой IP или Fingerprint. Отклоняем.');
               
               const errorPayload = JSON.stringify({
                 status: CONFIG.MSG.FORBIDDEN,
-                message: "INVALID_PAYLOAD" // Или любое твое сообщение об ошибке
+                message: CONFIG.MSG.EMPTY_FINGERPRINT
               });
 
-              await pipe(
-                [new TextEncoder().encode(errorPayload)],
-                lp.encode,
-                stream.sink
-              );
-              
-              break; // Выходим, чтобы не дергать базу
+              await pipe([new TextEncoder().encode(errorPayload)], lp.encode, stream.sink);
+              break; 
             }
 
-            // 2. Проверяем по базе данных SQLite
-            const isAllowed = checkAndLogRegistration(clientIp, clientFingerprint);
+            // Переменные для формирования ответа (теперь они видны везде)
+            let responseStatus = CONFIG.MSG.FORBIDDEN;
+            let responseMessage = CONFIG.MSG.LIMIT_EXCEEDED;
 
-            // 3. Формируем ответ для клиента
+            // ==========================================
+            // Обработка РЕГИСТРАЦИИ
+            // ==========================================
+            if (data.action === 'REGISTER') {
+              // 🌟 Передаем три параметра, как требует наша новая db.js
+              const isAllowed = checkAndLogRegistration(clientIp, clientFingerprint, data.profileDbAddress);
+              
+              responseStatus = isAllowed ? CONFIG.MSG.SUCCESS : CONFIG.MSG.FORBIDDEN;
+              responseMessage = isAllowed ? CONFIG.MSG.REG_IS_OVER : CONFIG.MSG.LIMIT_EXCEEDED;
+
+            // ==========================================
+            // Обработка ВХОДА
+            // ==========================================
+            } else if (data.action === 'LOGIN') {
+              console.log(`🔑 [Protocol] Проверяем вход для БД: ${data.profileDbAddress?.slice(0, 15)}...`);
+              
+              // Проверяем БД на наличие профиля
+              const userExists = checkIfProfileExists(data.profileDbAddress);
+
+              if (userExists) {
+                console.log(`✅ [Protocol] Пользователь найден в БД, вход разрешен.`);
+                responseStatus = CONFIG.MSG.SUCCESS;
+                responseMessage = "LOGIN_SUCCESS"; // Можно заменить на CONFIG переменную, если есть
+              } else {
+                console.warn(`⚠️ [Protocol] Отказ во входе: профиль не зарегистрирован.`);
+                responseStatus = CONFIG.MSG.NOT_FOUND;
+                responseMessage = CONFIG.MSG.PROFILE_NOT_FOUND;
+              }
+
+            // ==========================================
+            // Неизвестное действие
+            // ==========================================
+            } else {
+              console.warn(`⚠️ [Protocol] Неизвестное действие: ${data.action}`);
+              responseStatus = CONFIG.MSG.INCORRECT_ACTION;
+              responseMessage = CONFIG.MSG.INCORRECT_ACTION_MSG;
+            }
+
+            // ==========================================
+            // Единая отправка ответа обратно в стрим
+            // ==========================================
             const responsePayload = JSON.stringify({
-              status: isAllowed ? CONFIG.MSG.SUCCESS : CONFIG.MSG.FORBIDDEN,
-              message: isAllowed ? CONFIG.MSG.REG_IS_OVER : CONFIG.MSG.LIMIT_EXCEEDED
+              status: responseStatus,
+              message: responseMessage
             });
 
-            // Отправляем ответ обратно в стрим
             try {
               await pipe(
                 [new TextEncoder().encode(responsePayload)],
@@ -59,22 +92,17 @@ export function setupAntiFloodProtocol(libp2p) {
                 stream.sink
               );
             } catch (err) {
-              // Проверяем, не вызвана ли ошибка тем, что клиент уже отключился
-              if (err.message.includes('ended pushable') || err.message.includes('stream reset')) {
-                // Тихо игнорируем — база уже открыта, просто клиент не дождался ответа
-                // console.log('⚠️ [Protocol] Клиент закрыл стрим до получения ответа (нормально)');
-              } else {
-                // Реальные проблемы логируем
+              if (!err.message.includes('ended pushable') && !err.message.includes('stream reset')) {
                 console.error('❌ [Protocol] Ошибка ответа в стрим:', err);
               }
             }
             
-            break; // Обработали один пакет и закрываем цикл
+            break; // Обработали один пакет и закрываем цикл пакетной обработки
           }
         }
       );
     } catch (error) {
-      console.error('❌ [RPC Error] Ошибка обработки запроса регистрации:', error);
+      console.error('❌ [RPC Error] Ошибка обработки запроса:', error);
       stream.close();
     }
   });
@@ -98,15 +126,12 @@ export async function registerAnnounceProtocol(node, archivist, pendingRequests)
                   const now = Date.now();
                   if (pendingRequests.has(targetAddress)) {
                     const lastSeen = pendingRequests.get(targetAddress);
-                    if (now - lastSeen < CONFIG.DELAY_START_MS) return;  // Защита от спама
+                    if (now - lastSeen < CONFIG.DELAY_START_MS) return;  
                   }
   
                   pendingRequests.set(targetAddress, now);
-  
                   console.log(`🏠 [Protocol] Запрос на архивацию БД: ${targetAddress}`);
                   
-                  // ВАЖНО: Никаких await. База SQLite открывается в фоне,
-                  // стрим мгновенно освобождается, клиент не блокируется.
                   archivist.pinRoom(targetAddress, remotePeerId).catch(err => {
                     console.error('❌ Ошибка фонового открытия БД:', err);
                   });
