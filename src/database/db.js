@@ -14,19 +14,19 @@ db.pragma('journal_mode = WAL');
  */
 export function initDatabase() {
   db.prepare(`
-    CREATE TABLE IF NOT EXISTS registration_logs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      ip_address TEXT NOT NULL,
-      device_hash TEXT NOT NULL,
-      profile_address TEXT,
-      timestamp INTEGER NOT NULL
+    CREATE TABLE IF NOT EXISTS ${CONFIG.SQL.DB_NAME} (
+      ${CONFIG.SQL.ID_COLUMN} INTEGER PRIMARY KEY AUTOINCREMENT,
+      ${CONFIG.SQL.IP} TEXT NOT NULL,
+      ${CONFIG.SQL.DEVICE_HASH} TEXT NOT NULL,
+      ${CONFIG.SQL.PROFILE_ADDRESS} TEXT,
+      ${CONFIG.SQL.TIMESTAMP} INTEGER NOT NULL
     )
   `).run();
 
   // Создаем индексы для быстрого поиска
-  db.prepare('CREATE INDEX IF NOT EXISTS idx_ip ON registration_logs(ip_address)').run();
-  db.prepare('CREATE INDEX IF NOT EXISTS idx_device ON registration_logs(device_hash)').run();
-  db.prepare('CREATE INDEX IF NOT EXISTS idx_profile ON registration_logs(profile_address)').run();
+  db.prepare(`CREATE INDEX IF NOT EXISTS idx_ip ON ${CONFIG.SQL.DB_NAME}(${CONFIG.SQL.PROFILE_ADDRESS})`).run();
+  db.prepare(`CREATE INDEX IF NOT EXISTS idx_device ON ${CONFIG.SQL.DB_NAME}(${CONFIG.SQL.DEVICE_HASH})`).run();
+  db.prepare(`CREATE INDEX IF NOT EXISTS idx_profile ON ${CONFIG.SQL.DB_NAME}(${CONFIG.SQL.PROFILE_ADDRESS})`).run();
 
   console.log('🗄️ [SQLite] База данных и индексы успешно инициализированы.');
 }
@@ -41,12 +41,12 @@ export function checkAndLogRegistration(ip, deviceHash, profileAddress) {
 
   // 1. Считаем количество регистраций за последний год по IP
   const ipCountRow = db.prepare(
-    'SELECT COUNT(*) as count FROM registration_logs WHERE ip_address = ? AND timestamp > ?'
+    `SELECT COUNT(*) as count FROM ${CONFIG.SQL.DB_NAME} WHERE ${CONFIG.SQL.IP} = ? AND ${CONFIG.SQL.TIMESTAMP} > ?`
   ).get(ip, timeLimit);
 
   // 2. Считаем количество регистраций за последний год по Fingerprint устройства
   const deviceCountRow = db.prepare(
-    'SELECT COUNT(*) as count FROM registration_logs WHERE device_hash = ? AND timestamp > ?'
+    `SELECT COUNT(*) as count FROM ${CONFIG.SQL.DB_NAME} WHERE ${CONFIG.SQL.DEVICE_HASH} = ? AND ${CONFIG.SQL.TIMESTAMP} > ?`
   ).get(deviceHash, timeLimit);
 
   // 3. Проверяем жесткий лимит (не более 3 регистраций в год)
@@ -57,7 +57,7 @@ export function checkAndLogRegistration(ip, deviceHash, profileAddress) {
 
   // 4. Логируем успешную операцию вместе с profileAddress
   const insert = db.prepare(
-    'INSERT INTO registration_logs (ip_address, device_hash, profile_address, timestamp) VALUES (?, ?, ?, ?)'
+    `INSERT INTO ${CONFIG.SQL.DB_NAME} (${CONFIG.SQL.IP}, ${CONFIG.SQL.DEVICE_HASH}, ${CONFIG.SQL.PROFILE_ADDRESS}, ${CONFIG.SQL.TIMESTAMP}) VALUES (?, ?, ?, ?)`
   );
   insert.run(ip, deviceHash, profileAddress, now);
 
@@ -74,12 +74,56 @@ export function checkIfProfileExists(profileAddress) {
   if (!profileAddress) return false;
 
   try {
-    const stmt = db.prepare('SELECT COUNT(*) as count FROM registration_logs WHERE profile_address = ?');
+    const stmt = db.prepare(`SELECT COUNT(*) as count FROM ${CONFIG.SQL.DB_NAME} WHERE ${CONFIG.SQL.PROFILE_ADDRESS} = ?`);
     const result = stmt.get(profileAddress);
 
     return result.count > 0;
   } catch (error) {
     console.error('❌ [DB Error] Ошибка при проверке существования профиля:', error);
     return false;
+  }
+}
+
+// 1. Выгрузка всех регистраций для отправки соседу
+export function getAllRegistrations() {
+  try {
+    const stmt = db.prepare(`SELECT * FROM ${CONFIG.SQL.DB_NAME}`); 
+    return stmt.all();
+  } catch (err) {
+    console.error('❌ [DB] Ошибка чтения базы для синхронизации:', err);
+    return [];
+  }
+}
+
+// 2. Безопасное слияние чужих записей с нашими
+export function mergeRegistrations(records) {
+  if (!records || records.length === 0) return;
+
+  try {
+    // INSERT OR IGNORE гарантирует, что если запись с таким fingerprint/ip уже есть,
+    // БД просто пропустит её без ошибки (нужно, чтобы в таблице стоял UNIQUE констрейнт)
+    const insert = db.prepare(`
+      INSERT OR IGNORE INTO ${CONFIG.SQL.DB_NAME} (${CONFIG.SQL.IP}, ${CONFIG.SQL.DEVICE_HASH}, ${CONFIG.SQL.PROFILE_ADDRESS}, ${CONFIG.SQL.TIMESTAMP})
+      VALUES (?, ?, ?, ?)
+    `);
+
+    // Транзакция ускоряет массовую вставку в сотни раз
+    const transaction = db.transaction((rows) => {
+      let insertedCount = 0;
+      for (const row of rows) {
+        const result = insert.run(row.ip_address, row.device_hash, row.profile_address, row.timestamp);
+        if (result.changes > 0) insertedCount++;
+      }
+      return insertedCount;
+    });
+
+    const newRecordsCount = transaction(records);
+    if (newRecordsCount > 0) {
+      console.log(`🗄️ [DB-SYNC] База обновлена. Добавлено новых записей: ${newRecordsCount}`);
+    } else {
+      console.log(`🗄️ [DB-SYNC] Синхронизация завершена. Новых записей нет.`);
+    }
+  } catch (err) {
+    console.error('❌ [DB] Ошибка при слиянии записей БД:', err);
   }
 }

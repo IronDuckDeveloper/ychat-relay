@@ -14,33 +14,13 @@ import { ping } from '@libp2p/ping';
 import { kadDHT } from '@libp2p/kad-dht';
 import { all } from '@libp2p/websockets/filters';
 import { bitswap } from '@helia/block-brokers';
-
 import { CONFIG } from '../config.js';
 import { loadKnownPeersConfig } from '../storage/peers-config.js';
+import { loadNetworkPeers } from '../utils/peerLoader.js';
 
 export async function createRelayNode() {
-  let bootstrapList = [];
-  let directPeersList = [];
 
-  // Загрузка пиров из ENV или файла
-  if (process.env.BOOTSTRAP_LIST) {
-    bootstrapList = process.env.BOOTSTRAP_LIST.split(',').map(s => s.trim()).filter(Boolean);
-  } else {
-    const config = loadKnownPeersConfig();
-    if (config.relays && Array.isArray(config.relays)) {
-      config.relays.forEach(relay => {
-        if (CONFIG.MY_PUBLIC_IP && relay.address.includes(CONFIG.MY_PUBLIC_IP)) return;
-
-        bootstrapList.push(`${relay.address}/p2p/${relay.peerId}`);
-        directPeersList.push({
-          id: peerIdFromString(relay.peerId),
-          addrs: [multiaddr(relay.address)]
-        });
-      });
-      console.log(`📂 Загружено соседей из файла: ${bootstrapList.length}`);
-    }
-  }
-
+  const { bootstrapList, directPeersList } = loadNetworkPeers(loadKnownPeersConfig);
   const datastore = new FsDatastore(CONFIG.DATA_DIR);
   const blockstore = new LevelBlockstore(CONFIG.ORBITDB_BLOCKS_DIR);
 
@@ -56,8 +36,8 @@ export async function createRelayNode() {
     blockBrokers: [bitswap()],
     libp2p: {
       addresses: {
-        listen: ['/ip4/0.0.0.0/tcp/15002/ws'],
-        announce: [`/ip4/${CONFIG.MY_PUBLIC_IP}/tcp/15002/ws`]
+        listen: [`/ip4/0.0.0.0/tcp/${CONFIG.NETWORK.PORT}/ws`],
+        announce: [`/ip4/${CONFIG.NETWORK.IP}/tcp/${CONFIG.NETWORK.PORT}/ws`]
       },
       transports: [webSockets({ filter: all })],
       connectionManager: {

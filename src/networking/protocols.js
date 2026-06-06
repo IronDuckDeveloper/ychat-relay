@@ -1,10 +1,10 @@
-// src/networking/rpcHandler.ts
 import * as lp from 'it-length-prefixed';
 import { pipe } from 'it-pipe';
 import { checkAndLogRegistration, checkIfProfileExists } from '../database/db.js';
+import { generateAuthToken } from '../utils/crypto.js';
 import { CONFIG } from '../config.js';
 
-export function setupAntiFloodProtocol(libp2p) {
+export function setupAntiFloodProtocol(libp2p, pubsub) {
   console.log(`📡 [libp2p] Регистрация кастомного протокола: ${CONFIG.TOPICS.RPC_PROTOCOL}`);
 
   libp2p.handle(CONFIG.TOPICS.RPC_PROTOCOL, async ({ stream, connection }) => {
@@ -49,6 +49,25 @@ export function setupAntiFloodProtocol(libp2p) {
               responseStatus = isAllowed ? CONFIG.MSG.SUCCESS : CONFIG.MSG.FORBIDDEN;
               responseMessage = isAllowed ? CONFIG.MSG.REG_IS_OVER : CONFIG.MSG.LIMIT_EXCEEDED;
 
+              try {
+                const timestamp = Date.now();
+                const auth = generateAuthToken(timestamp, CONFIG.SECURITY.clusterSecret);
+                
+                // Формируем запись так, как ожидает функция mergeRegistrations
+                const liveRecord = {
+                  ip: clientIp,
+                  fingerprint: clientFingerprint,
+                  profile_address: data.profileDbAddress,
+                  created_at: timestamp
+                };
+
+                const payload = JSON.stringify({ timestamp, auth, record: liveRecord });
+
+                pubsub.publish(CONFIG.TOPICS.DB_LIVE_SYNC, new TextEncoder().encode(payload));
+                console.log(`📢 [LIVE-SYNC] Бродкаст новой регистрации отправлен в кластер.`);
+              } catch (err) {
+                console.error('❌ [LIVE-SYNC] Ошибка отправки бродкаста:', err.message);
+              }
             // ==========================================
             // Обработка ВХОДА
             // ==========================================
@@ -61,7 +80,7 @@ export function setupAntiFloodProtocol(libp2p) {
               if (userExists) {
                 console.log(`✅ [Protocol] Пользователь найден в БД, вход разрешен.`);
                 responseStatus = CONFIG.MSG.SUCCESS;
-                responseMessage = "LOGIN_SUCCESS"; // Можно заменить на CONFIG переменную, если есть
+                responseMessage = CONFIG.MSG.LOGIN_SUCCESS;
               } else {
                 console.warn(`⚠️ [Protocol] Отказ во входе: профиль не зарегистрирован.`);
                 responseStatus = CONFIG.MSG.NOT_FOUND;
