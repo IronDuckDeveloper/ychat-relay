@@ -33,18 +33,44 @@ export function setupDatabaseSyncProtocol(node) {
               return;
             }
 
-            // Выгружаем записи и отправляем
+            // Выгружаем записи
             const records = getAllRegistrations();
-            const responsePayload = JSON.stringify({ records });
+            const CHUNK_SIZE = 500; // Отправляем по 500 записей за раз
+            const totalChunks = Math.ceil(records.length / CHUNK_SIZE);
 
+            if (records.length === 0) {
+              // База пуста, отправляем пустой ответ
+              const emptyPayload = JSON.stringify({ records: [], isLast: true });
+              await pipe([new TextEncoder().encode(emptyPayload)], lp.encode, stream.sink);
+              return;
+            }
+
+            console.log(`⏳ [DB-SYNC] Начинаем отправку ${records.length} записей (чанков: ${totalChunks})...`);
+
+            // 📦 Функция-генератор чанков
+            async function* generateChunks() {
+              for (let i = 0; i < totalChunks; i++) {
+                const slice = records.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+                const isLast = i === totalChunks - 1;
+                
+                const payload = JSON.stringify({ 
+                  records: slice, 
+                  isLast: isLast 
+                });
+                
+                yield new TextEncoder().encode(payload);
+              }
+            }
+
+            // Отправляем чанки в стрим один за другим
             await pipe(
-              [new TextEncoder().encode(responsePayload)],
+              generateChunks(),
               lp.encode,
               stream.sink
             );
             
-            console.log(`📤 [DB-SYNC] Успешно отправлено ${records.length} записей для ${connection.remotePeer.toString().slice(-6)}`);
-            break;
+            console.log(`📤 [DB-SYNC] Успешно завершена отправка для ${connection.remotePeer.toString().slice(-6)}`);
+            break; // Обработали запрос, выходим из цикла чтения
           }
         }
       );
@@ -67,13 +93,16 @@ export async function requestDatabaseSync(node, targetMultiaddrStr) {
 
     const requestPayload = JSON.stringify({ timestamp, auth });
 
+    // Отправляем запрос
     await pipe(
       [new TextEncoder().encode(requestPayload)],
       lp.encode,
       stream.sink
     );
 
-    // Читаем ответ
+    let totalReceived = 0;
+
+    // Читаем ответ частями
     await pipe(
       stream.source,
       lp.decode,
@@ -82,10 +111,18 @@ export async function requestDatabaseSync(node, targetMultiaddrStr) {
           const response = JSON.parse(new TextDecoder().decode(chunk.subarray()));
           
           if (response.records && Array.isArray(response.records)) {
-            console.log(`📥 [DB-SYNC] Получено ${response.records.length} записей. Запускаем слияние...`);
+            totalReceived += response.records.length;
+            console.log(`📥 [DB-SYNC] Получен чанк: ${response.records.length} записей (Всего скачано: ${totalReceived})`);
+            
+            // Сразу мержим чанк в базу, не ждем конца скачивания
             mergeRegistrations(response.records);
           }
-          break;
+
+          // Если это последний кусок — прерываем чтение
+          if (response.isLast) {
+            console.log(`✅ [DB-SYNC] Синхронизация полностью завершена. Всего принято: ${totalReceived}`);
+            break;
+          }
         }
       }
     );

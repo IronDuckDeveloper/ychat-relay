@@ -67,6 +67,7 @@ export const CONFIG = {
     ANNOUNCE: '/p2p-relay/v1/announce', // Топик для объявления о себе
     PEER_SYNC_REQUEST: 'peers:sync:request', // Топик для запроса синхронизации пиров
     PEER_SYNC_RESPONSE_BASE: 'peers:sync:response:', // Базовый топик для ответа на синхронизацию пиров (добавляем ID запроса)
+    PROFILE_UPDATES_TOPIC: 'ychat/profiles/updates', // Топик для обновления профилей
     RPC_PROTOCOL: '/ychat/anti-flood/1.0.0', // Протокол для RPC-метода проверки регистрации (антифрод)
     DB_SYNC: '/ychat/db-sync/1.0.0', // Протокол для синхронизации БД между релеями при старте
     DB_LIVE_SYNC: '/ychat/db-live-sync/1.0.0', // Протокол для живой синхронизации БД при добавлении новых записей

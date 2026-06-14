@@ -23,75 +23,74 @@ export function setupPubSubHandlers(node, pubsub) {
         const target = payload?.from;
         if (!target || target === node.peerId.toString()) return;
 
-        // 🛡️ ПРОВЕРКА БЕЗОПАСНОСТИ КЛУБА
+        // 1. БЛОК ЗАПИСИ (Доступен только для других релеев)
+      if (payload.relay) {
         const { timestamp, auth } = payload;
+        
         if (!timestamp || !auth) {
-          console.warn(`🔒 [PEER-SYNC] Отклонено от ${target.slice(-6)}: отсутствует авторизация.`);
-          return;
-        }
-
-        // Проверяем «свежесть» токена (защита от повтора старых пакетов)
-        const timeDifference = Math.abs(Date.now() - timestamp);
-        if (timeDifference > CONFIG.LIVE_STAMP_TOKEN) { // Токен живет ровно 1 минуту
-          console.warn(`🔒 [PEER-SYNC] Отклонено от ${target.slice(-6)}: токен устарел (${timeDifference}ms)`);
-          return;
-        }
-
-        // Пересчитываем хэш с локальным секретом
-        const expectedAuth = generateAuthToken(timestamp, CONFIG.SECURITY.clusterSecret);
-        if (auth !== expectedAuth) {
-          console.warn(`🔒 [PEER-SYNC] КРИТИЧЕСКАЯ ОШИБКА АВТОРИЗАЦИИ: Узел ${target.slice(-6)} прислал неверный токен!`);
-          return; // Пароли не совпали, игнорируем узел полностью
-        }
-
-        // Если проверка пройдена — узел легитимен, работаем с базой
-        if (payload.relay) {
-          const current = loadKnownPeersConfig();
-
-          // Ищем дубликат: совпадает либо PeerID, либо IP-адрес
-          const existingIndex = current.relays.findIndex(r => 
-            r.peerId === payload.relay.peerId || r.address === payload.relay.address
-          );
-
-          // Узел найден. Проверяем, изменились ли данные
-          if (existingIndex !== -1) {
-            const existing = current.relays[existingIndex];
-            if (existing.peerId !== payload.relay.peerId || 
-                existing.address !== payload.relay.address || 
-                existing.name !== payload.relay.name) {
-              
-              // Перезаписываем устаревшую запись актуальными данными
-              current.relays[existingIndex] = payload.relay;
-              saveKnownPeersConfig(current);
-              console.log(`🔄 [PEER-SYNC] Обновлены данные узла: ${payload.relay.name}`);
-            }
+          console.warn(`🔒 [PEER-SYNC] Отклонено от ${target.slice(-6)}: попытка изменить список релеев без авторизации.`);
+          // ВАЖНО: здесь мы не делаем глобальный return, 
+          // а просто пропускаем блок добавления в базу!
+        } else {
+          // Проверяем токен
+          const timeDifference = Math.abs(Date.now() - timestamp);
+          if (timeDifference > CONFIG.LIVE_STAMP_TOKEN) {
+            console.warn(`🔒 [PEER-SYNC] Токен устарел от ${target.slice(-6)}`);
           } else {
-            // Узла нет в списке, добавляем как новый
-            current.relays.push(payload.relay);
-            saveKnownPeersConfig(current);
-            console.log(`🆕 [PEER-SYNC] Добавлен новый узел: ${payload.relay.name}`);
+            const expectedAuth = generateAuthToken(timestamp, CONFIG.SECURITY.clusterSecret);
+            if (auth !== expectedAuth) {
+              console.warn(`🔒 [PEER-SYNC] КРИТИЧЕСКАЯ ОШИБКА: неверный пароль от ${target.slice(-6)}!`);
+            } else {
+              // ✅ Пароль совпал, обновляем базу релеев
+              const current = loadKnownPeersConfig();
+              const existingIndex = current.relays.findIndex(r => 
+                r.peerId === payload.relay.peerId || r.address === payload.relay.address
+              );
+
+              if (existingIndex !== -1) {
+                const existing = current.relays[existingIndex];
+                if (existing.peerId !== payload.relay.peerId || 
+                    existing.address !== payload.relay.address || 
+                    existing.name !== payload.relay.name) {
+                  
+                  // Перезаписываем устаревшую запись актуальными данными
+                  current.relays[existingIndex] = payload.relay;
+                  saveKnownPeersConfig(current);
+                  console.log(`🔄 [PEER-SYNC] Обновлены данные узла: ${payload.relay.name}`);
+                }
+              } else {
+                // Узла нет в списке, добавляем как новый
+                current.relays.push(payload.relay);
+                saveKnownPeersConfig(current);
+                console.log(`🆕 [PEER-SYNC] Добавлен новый узел: ${payload.relay.name}`);
+              }
+              saveKnownPeersConfig(current);
+            }
           }
         }
-
-        // Отправляем ответ, также защищая его подписью, чтобы запрашивающий знал, что мы тоже "свои"
-        const config = loadKnownPeersConfig();
-        const responseTopic = `${CONFIG.TOPICS.PEER_SYNC_RESPONSE_BASE}${target}`;
-        
-        const resTimestamp = Date.now();
-        const resAuth = generateAuthToken(resTimestamp, CONFIG.SECURITY.clusterSecret);
-
-        const responsePayload = JSON.stringify({ 
-          relays: config.relays,
-          timestamp: resTimestamp,
-          auth: resAuth
-        });
-
-        await pubsub.publish(responseTopic, new TextEncoder().encode(responsePayload));
-        console.log(`📤 [PEER-SYNC] Отправлен подписанный список пиров для ${target.slice(-6)}`);
-      } catch (e) {
-        console.error('❌ Ошибка в PEER_SYNC_REQUEST:', e.message);
       }
+
+      // 2. БЛОК ЧТЕНИЯ (Выполняется ВСЕГДА, отдаем список всем: и релеям, и клиентам-браузерам)
+      const config = loadKnownPeersConfig();
+      const responseTopic = `${CONFIG.TOPICS.PEER_SYNC_RESPONSE_BASE}${target}`;
+      
+      const resTimestamp = Date.now();
+      // Сервер подписывает свой ответ, чтобы другие релеи знали, что список легитимный
+      const resAuth = generateAuthToken(resTimestamp, CONFIG.SECURITY.clusterSecret);
+
+      const responsePayload = JSON.stringify({ 
+        relays: config.relays,
+        timestamp: resTimestamp,
+        auth: resAuth
+      });
+
+      await pubsub.publish(responseTopic, new TextEncoder().encode(responsePayload));
+      console.log(`📤 [PEER-SYNC] Отправлен список пиров для ${target.slice(-6)}`);
+      
+    } catch (e) {
+      console.error('❌ Ошибка в PEER_SYNC_REQUEST:', e.message);
     }
+  }
 
     // ==========================================
     // ОБРАБОТКА ЖИВОЙ СИНХРОНИЗАЦИИ БД (Incoming Live Sync)

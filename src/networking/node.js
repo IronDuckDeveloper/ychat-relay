@@ -82,9 +82,16 @@ export async function createRelayNode() {
           allowPublishToZeroTopicPeers: true
         }),
         relay: circuitRelayServer({
-          reservations: { maxReservations: Infinity },
+          reservations: { 
+            maxReservations: Infinity,
+            reservationTtl: 5 * 60 * 1000 // Время жизни резервации (5 минут)
+          },
           advertise: { enabled: true },
-          hop: { enabled: true, timeout: 30000 }
+          // В v2 лимиты сессии (data и duration) передаются через объект внутри конфигурации сервера
+          limit: {
+            duration: 300000, // Увеличиваем лимит жизни сквозного туннеля до 5 минут (300000 ms)
+            data: 1024 * 1024 * 1024 // 1 GB трафика на сессию
+          }
         }),
         dht: kadDHT({
           clientMode: false,

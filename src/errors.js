@@ -25,7 +25,8 @@ process.on('unhandledRejection', (reason) => {
   if (
     msg.includes('stream reset') || 
     msg.includes('The operation was aborted') || 
-    msg.includes('unexpected end of input')
+    msg.includes('unexpected end of input')||
+    msg.includes('Cannot push value onto an ended pushable')
   ) {
     return;
   }

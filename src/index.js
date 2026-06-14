@@ -79,6 +79,8 @@ async function main() {
   await safeSubscribe(pubsub, CONFIG.TOPICS.PEER_SYNC_REQUEST);
   // 6. Подписка на топик живой синхронизации БД (для получения новых регистраций от других релеев)
   await safeSubscribe(pubsub, CONFIG.TOPICS.DB_LIVE_SYNC);
+  // 7. Подписка на топик обновлений профилей (для обмена данными клиентами)
+  await safeSubscribe(pubsub, CONFIG.TOPICS.PROFILE_UPDATES_TOPIC);
 
   console.log('🔗 PeerID:', node.peerId.toString());
   console.log('🚀 SERVER READY (ARCHIVIST MODE)');
