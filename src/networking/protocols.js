@@ -45,6 +45,11 @@ export function setupAntiFloodProtocol(libp2p, pubsub) {
             if (data.action === 'REGISTER') {
               // 🌟 Передаем три параметра, как требует наша новая db.js
               const isAllowed = checkAndLogRegistration(clientIp, clientFingerprint, data.profileDbAddress);
+
+              if (isAllowed && data.profileDbAddress) {
+                // Заставляем релей стать сидом для профиля
+                archivist.pinRoom(data.profileDbAddress).catch(e => console.error('Ошибка пина профиля:', e));
+              }
               
               responseStatus = isAllowed ? CONFIG.MSG.SUCCESS : CONFIG.MSG.FORBIDDEN;
               responseMessage = isAllowed ? CONFIG.MSG.REG_IS_OVER : CONFIG.MSG.LIMIT_EXCEEDED;
@@ -78,6 +83,8 @@ export function setupAntiFloodProtocol(libp2p, pubsub) {
               const userExists = checkIfProfileExists(data.profileDbAddress);
 
               if (userExists) {
+                // При логине тоже поднимаем базу в память релея
+                archivist.pinRoom(data.profileDbAddress).catch(e => console.error('Ошибка пина профиля:', e));
                 console.log(`✅ [Protocol] Пользователь найден в БД, вход разрешен.`);
                 responseStatus = CONFIG.MSG.SUCCESS;
                 responseMessage = CONFIG.MSG.LOGIN_SUCCESS;
