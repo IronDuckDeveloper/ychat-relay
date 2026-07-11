@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  ychat-relay:
+    build: .
+    container_name: ychat-relay
+    restart: unless-stopped
+    ports:
+      # Пробрасываем порт из переменной окружения или используем 15002 по умолчанию
+      - "${PORT:-15002}:${PORT:-15002}"
+    env_file:
+      - .env
+    environment:
+      # Настройки для будущего подключения к Kubo
+      - KUBO_HOST=ychat-kubo
+      - KUBO_PORT=5001
+    volumes:
+      # Привязка локальной папки data к папке внутри контейнера
+      - ./data:/usr/src/app/data
+    depends_on:
+      - ychat-kubo
+
+  ychat-kubo:
+    image: ipfs/kubo:latest
+    container_name: ychat-kubo
+    restart: unless-stopped
+    ports:
+      - "4001:4001"        # IPFS Swarm
+      - "4001:4001/udp"    # IPFS Swarm QUIC
+      - "5001:5001"        # RPC API
+      - "8081:8080"        # Gateway
+    volumes:
+      # Именованные тома Docker для сохранения данных Kubo
+      - kubo_data:/data/ipfs
+      - kubo_export:/export
+
+volumes:
+  kubo_data:
+  kubo_export:
