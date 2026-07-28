@@ -31,7 +31,7 @@ export const CONFIG = {
 
   NETWORK: {
     IP: publicIp, // Защита от undefined
-    PORT: parseInt(process.env.PORT || '15002', 10),
+    PORT: parseInt(process.env.PORT || '15003', 10),
     BOOTSTRAP_LIST: bootstrapPeersArray
   },
   SECURITY: {
@@ -48,7 +48,8 @@ export const CONFIG = {
     REGISTRATION_IS_OVER : 'Registration allowed',
     LIMIT_EXCEEDED : 'Registration limit per device/IP exceeded',
     EMPTY_FINGERPRINT : 'Empty fingerprint provided',
-    PROFILE_NOT_FOUND : 'Profile not found. Please check that the seed phrase is correct.'
+    PROFILE_NOT_FOUND : 'Profile not found. Please check that the seed phrase is correct.',
+    PROFILE_UPDATED: 'PROFILE_UPDATED', // Сообщение об обновлении профиля
   },
 
   SQL: {

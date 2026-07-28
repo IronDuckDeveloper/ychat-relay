@@ -17,7 +17,7 @@ RUN npm install
 COPY . .
 
 # Пробрасываем порт
-EXPOSE 15002
+EXPOSE 15003
 
 # Команда для запуска релея
 CMD ["node", "src/index.js"]

@@ -19,7 +19,8 @@
     "dotenv": "^17.4.2",
     "helia": "4.2.6",
     "it-length-prefixed": "^11.0.1",
-    "it-pipe": "^3.0.1"
+    "it-pipe": "^3.0.1",
+    "kubo-rpc-client": "^7.1.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13"

@@ -2,13 +2,13 @@
   "relays": [
     {
       "name": "Relay-1-Main",
-      "peerId": "12D3KooWKQNgHRQ3YemVphs7jyeqFRg44nEsgXdXN48BQWdn1cae",
-      "address": "/ip4/38.180.0.13/tcp/15002/ws"
+      "peerId": "12D3KooWK9BkrcdhfJDPawauyry4oCQuYmcWJwwRW9jHCqKGLCDa",
+      "address": "/ip4/38.180.0.13/tcp/15003/ws"
     },
     {
       "name": "Relay-2-Backup",
-      "peerId": "12D3KooWQ8R8A3qQi9pUtjbE5nrxhyrzDKHfWBQrbfuwG7GtzPDE",
-      "address": "/ip4/62.109.15.216/tcp/15002/ws"
+      "peerId": "12D3KooWFXc9hJZxBTns1v2gUn7miBN5HA5hVFxVca6Y68m4a3NF",
+      "address": "/ip4/62.109.15.216/tcp/15003/ws"
     }
   ]
 }

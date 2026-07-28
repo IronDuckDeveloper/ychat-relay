@@ -54,7 +54,7 @@ test('📋 Тестирование адресной книги (known-peers.jso
     const newRelay = {
       name: "Relay-Main",
       peerId: "ID-AAA",
-      address: "/ip4/1.1.1.1/tcp/15002/ws"
+      address: "/ip4/1.1.1.1/tcp/15003/ws"
     };
 
     const result = processIncomingRelay(newRelay);
@@ -69,7 +69,7 @@ test('📋 Тестирование адресной книги (known-peers.jso
     const identicalRelay = {
       name: "Relay-Main",
       peerId: "ID-AAA",
-      address: "/ip4/1.1.1.1/tcp/15002/ws"
+      address: "/ip4/1.1.1.1/tcp/15003/ws"
     };
 
     const result = processIncomingRelay(identicalRelay);
@@ -83,7 +83,7 @@ test('📋 Тестирование адресной книги (known-peers.jso
     const rebootedRelay = {
       name: "Relay-Main",
       peerId: "ID-NEW-NEW-NEW", // Новый ID
-      address: "/ip4/1.1.1.1/tcp/15002/ws"   // Тот же IP
+      address: "/ip4/1.1.1.1/tcp/15003/ws"   // Тот же IP
     };
 
     const result = processIncomingRelay(rebootedRelay);
@@ -98,7 +98,7 @@ test('📋 Тестирование адресной книги (known-peers.jso
     const movedRelay = {
       name: "Relay-Main",
       peerId: "ID-NEW-NEW-NEW", // Тот же ID
-      address: "/ip4/2.2.2.2/tcp/15002/ws"   // Новый IP
+      address: "/ip4/2.2.2.2/tcp/15003/ws"   // Новый IP
     };
 
     const result = processIncomingRelay(movedRelay);
@@ -106,7 +106,7 @@ test('📋 Тестирование адресной книги (known-peers.jso
 
     assert.strictEqual(result, 'UPDATED');
     assert.strictEqual(config.relays.length, 1); 
-    assert.strictEqual(config.relays[0].address, '/ip4/2.2.2.2/tcp/15002/ws'); // IP обновился
+    assert.strictEqual(config.relays[0].address, '/ip4/2.2.2.2/tcp/15003/ws'); // IP обновился
   });
 
   // Чистим за собой

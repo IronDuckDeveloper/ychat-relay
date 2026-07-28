@@ -3,8 +3,9 @@ import { pipe } from 'it-pipe';
 import { checkAndLogRegistration, checkIfProfileExists } from '../database/db.js';
 import { generateAuthToken } from '../utils/crypto.js';
 import { CONFIG } from '../config.js';
+import { multiaddr } from '@multiformats/multiaddr';
 
-export function setupAntiFloodProtocol(libp2p, pubsub) {
+export function setupAntiFloodProtocol(libp2p, pubsub, archivist) {
   console.log(`📡 [libp2p] Регистрация кастомного протокола: ${CONFIG.TOPICS.RPC_PROTOCOL}`);
 
   libp2p.handle(CONFIG.TOPICS.RPC_PROTOCOL, async ({ stream, connection }) => {
@@ -43,13 +44,18 @@ export function setupAntiFloodProtocol(libp2p, pubsub) {
             // Обработка РЕГИСТРАЦИИ
             // ==========================================
             if (data.action === 'REGISTER') {
-              // 🌟 Передаем три параметра, как требует наша новая db.js
               const isAllowed = checkAndLogRegistration(clientIp, clientFingerprint, data.profileDbAddress);
 
               if (isAllowed && data.profileDbAddress) {
-                // Заставляем релей стать сидом для профиля
-                archivist.pinRoom(data.profileDbAddress).catch(e => console.error('Ошибка пина профиля:', e));
-              }
+                // ВАЖНО: Ты сейчас пробуешь пинить, но релей не знает, ГДЕ искать эту базу.
+                // Если клиент прислал свой IP/PeerID в data, используй это:
+                if (data.clientMultiaddr) {
+                  console.log(`🔗 [Архивариус] Пытаюсь соединиться с клиентом: ${data.clientMultiaddr}`);
+                  await libp2p.dial(multiaddr(data.clientMultiaddr)).catch(e => console.error('Не смог подконнектиться к клиенту:', e));
+                }
+                  // Заставляем релей стать сидом для профиля
+                  archivist.pinRoom(data.profileDbAddress).catch(e => console.error('Ошибка пина профиля:', e));
+                }
               
               responseStatus = isAllowed ? CONFIG.MSG.SUCCESS : CONFIG.MSG.FORBIDDEN;
               responseMessage = isAllowed ? CONFIG.MSG.REG_IS_OVER : CONFIG.MSG.LIMIT_EXCEEDED;
@@ -58,7 +64,6 @@ export function setupAntiFloodProtocol(libp2p, pubsub) {
                 const timestamp = Date.now();
                 const auth = generateAuthToken(timestamp, CONFIG.SECURITY.clusterSecret);
                 
-                // Формируем запись так, как ожидает функция mergeRegistrations
                 const liveRecord = {
                   ip: clientIp,
                   fingerprint: clientFingerprint,
@@ -83,12 +88,18 @@ export function setupAntiFloodProtocol(libp2p, pubsub) {
               const userExists = checkIfProfileExists(data.profileDbAddress);
 
               if (userExists) {
+                // ВАЖНО: Добавили коннект при логине!
+                if (data.clientMultiaddr) {
+                  console.log(`🔗 [Архивариус] Пытаюсь соединиться с клиентом: ${data.clientMultiaddr}`);
+                  await libp2p.dial(multiaddr(data.clientMultiaddr)).catch(e => console.error('Не смог подконнектиться к клиенту:', e));
+                }
+
                 // При логине тоже поднимаем базу в память релея
                 archivist.pinRoom(data.profileDbAddress).catch(e => console.error('Ошибка пина профиля:', e));
                 console.log(`✅ [Protocol] Пользователь найден в БД, вход разрешен.`);
                 responseStatus = CONFIG.MSG.SUCCESS;
                 responseMessage = CONFIG.MSG.LOGIN_SUCCESS;
-              } else {
+              }else {
                 console.warn(`⚠️ [Protocol] Отказ во входе: профиль не зарегистрирован.`);
                 responseStatus = CONFIG.MSG.NOT_FOUND;
                 responseMessage = CONFIG.MSG.PROFILE_NOT_FOUND;
@@ -131,7 +142,10 @@ export function setupAntiFloodProtocol(libp2p, pubsub) {
       console.error('❌ [RPC Error] Ошибка обработки запроса:', error);
       stream.close();
     }
-  });
+  }, {
+    runOnTransientConnection: true
+  }
+);
 }
 
 export async function registerAnnounceProtocol(node, archivist, pendingRequests) {
@@ -174,5 +188,8 @@ export async function registerAnnounceProtocol(node, archivist, pendingRequests)
       } catch (err) {
         console.error(`❌ [Protocol] Ошибка стрима: ${err.message}`);
       }
-    });
+    }, {
+      runOnTransientConnection: true
+    }
+  );
 }

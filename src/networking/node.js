@@ -94,6 +94,7 @@ export async function createRelayNode() {
           }
         }),
         dht: kadDHT({
+          protocol: '/ychat/kad/1.0.0',
           clientMode: false,
           kBucketSize: 20,
           validators: {},

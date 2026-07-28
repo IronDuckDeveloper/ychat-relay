@@ -132,7 +132,7 @@ async pinRoom(roomAddress, requesterPeerId = null) {
           console.log(`✅ Успешно открыта: ${roomAddress}`);
           // Принудительная репликация при каждом обновлении
       db.events.on('update', async (entry) => {
-        console.log(`[UPDATE] ${roomAddress.slice(-12)}`);        
+        console.log(`[UPDATE] ${roomAddress.slice(-12)}`);      
         // Форсируем распространение
         try {
           await db.replicate();

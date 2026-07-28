@@ -7,7 +7,7 @@ import { loadKnownPeersConfig, saveKnownPeersConfig } from '../storage/peers-con
 import { generateAuthToken } from '../utils/crypto.js';
 import { mergeRegistrations } from '../database/db.js'; // <-- Добавь эту строку
 
-export function setupPubSubHandlers(node, pubsub) {
+export function setupPubSubHandlers(node, pubsub, archivistService = null, orbitdb = null) {
   pubsub.addEventListener('message', async (evt) => {
     const msg = evt.detail || evt;
     const { topic, data, from } = msg;
@@ -124,6 +124,35 @@ export function setupPubSubHandlers(node, pubsub) {
         console.error('❌ [LIVE-SYNC] Ошибка обработки бродкаста:', err.message);
       }
       return; // Важно выйти, чтобы сообщение не обрабатывалось дальше
+    }
+
+    // ==========================================
+    // 🔥 ОБРАБОТКА ОБНОВЛЕНИЙ ПРОФИЛЕЙ (Аватарки)
+    // ==========================================
+    if (topic === CONFIG.TOPICS.PROFILE_UPDATES_TOPIC) {
+      try {
+        const payload = JSON.parse(text);
+        // Иначе игнорируются клиенты, которые обновили только никнейм.
+        if (payload.type === CONFIG.MSG.PROFILE_UPDATED) {
+
+          // ПИННИНГ БАЗЫ ДАННЫХ ПРОФИЛЯ
+          if (payload.profileDbAddress && orbitdb) {
+            console.log(`🗄️ [PubSub] Обнаружена БД профиля: ${payload.profileDbAddress}. Начинаем синхронизацию...`);
+            
+            // Открываем базу на релее. В этот момент OrbitDB сам стянет данные с клиента!
+            orbitdb.open(payload.profileDbAddress).then(() => {
+              console.log(`✅ [Кэш] База профиля ${payload.profileDbAddress} успешно открыта (запинена) на Релее!`);
+            }).catch(err => {
+              console.error(`❌ Ошибка открытия БД профиля на Релее:`, err.message);
+            });
+          } else if (payload.profileDbAddress && !orbitdb) {
+            console.warn(`⚠️ [PubSub] Инстанс orbitdb не передан в обработчики, пиннинг БД ${payload.profileDbAddress} невозможен!`);
+          }
+        }
+      } catch (err) {
+        console.error('❌ Ошибка обработки профиля:', err);
+      }
+      return; // Важно выйти, чтобы не дублировать логи ниже
     }
 
         // Обычные сообщения (чат)
