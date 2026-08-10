@@ -5,7 +5,8 @@ import { generateAuthToken } from '../utils/crypto.js';
 import { CONFIG } from '../config.js';
 import { multiaddr } from '@multiformats/multiaddr';
 
-export function setupAntiFloodProtocol(libp2p, pubsub, archivist) {
+// 🔥 ДОБАВЛЕНО: globalRegistryDb в аргументы функции
+export function setupAntiFloodProtocol(libp2p, pubsub, archivist, globalRegistryDb = null) {
   console.log(`📡 [libp2p] Регистрация кастомного протокола: ${CONFIG.TOPICS.RPC_PROTOCOL}`);
 
   libp2p.handle(CONFIG.TOPICS.RPC_PROTOCOL, async ({ stream, connection }) => {
@@ -21,7 +22,7 @@ export function setupAntiFloodProtocol(libp2p, pubsub, archivist) {
             const clientFingerprint = data.fingerprint;
             const clientIp = data.ipAddress;
 
-            console.log(`📥 [RPC] Запрос верификации. Действие: ${data.action}, Сетевой IP: ${clientIp}, FP: ${clientFingerprint?.slice(0, 10)}...`);
+            console.log(`📥 [RPC] Запрос верификации. Действие: ${data.action}, Сетевой IP: ${clientIp}, FP: ${clientFingerprint?.slice(-12)}...`);
 
             // Защита от пустых данных
             if (!clientIp || !clientFingerprint) {
@@ -36,7 +37,7 @@ export function setupAntiFloodProtocol(libp2p, pubsub, archivist) {
               break; 
             }
 
-            // Переменные для формирования ответа (теперь они видны везде)
+            // Переменные для формирования ответа
             let responseStatus = CONFIG.MSG.FORBIDDEN;
             let responseMessage = CONFIG.MSG.LIMIT_EXCEEDED;
 
@@ -47,15 +48,41 @@ export function setupAntiFloodProtocol(libp2p, pubsub, archivist) {
               const isAllowed = checkAndLogRegistration(clientIp, clientFingerprint, data.profileDbAddress);
 
               if (isAllowed && data.profileDbAddress) {
-                // ВАЖНО: Ты сейчас пробуешь пинить, но релей не знает, ГДЕ искать эту базу.
-                // Если клиент прислал свой IP/PeerID в data, используй это:
                 if (data.clientMultiaddr) {
                   console.log(`🔗 [Архивариус] Пытаюсь соединиться с клиентом: ${data.clientMultiaddr}`);
                   await libp2p.dial(multiaddr(data.clientMultiaddr)).catch(e => console.error('Не смог подконнектиться к клиенту:', e));
                 }
-                  // Заставляем релей стать сидом для профиля
-                  archivist.pinRoom(data.profileDbAddress).catch(e => console.error('Ошибка пина профиля:', e));
+                
+                // Заставляем релей стать сидом для профиля
+                archivist.pinRoom(data.profileDbAddress).catch(e => console.error('Ошибка пина профиля:', e));
+                
+                // 🔥 1. МГНОВЕННАЯ ЗАПИСЬ В ГЛОБАЛЬНЫЙ РЕЕСТР НА РЕЛЕЕ
+                const targetPeerId = data.peerId || connection?.remotePeer?.toString();
+                if (targetPeerId && globalRegistryDb) {
+                  try {
+                    await globalRegistryDb.put(targetPeerId, data.profileDbAddress);
+                    console.log(`📇 [RPC-Register] Мгновенно привязали PeerID к БД: ${targetPeerId.slice(-12)} -> ${data.profileDbAddress}`);
+                  } catch (regErr) {
+                    console.error('❌ [RPC-Register] Ошибка записи в globalRegistryDb:', regErr.message);
+                  }
                 }
+
+                // 🔥 2. БРОДКАСТ ОБНОВЛЕНИЯ ПРОФИЛЯ В СЕТЬ (для синхронизации никнейма и адреса)
+                if (targetPeerId) {
+                  try {
+                    const profileUpdatePayload = JSON.stringify({
+                      type: CONFIG.MSG.PROFILE_UPDATED,
+                      senderId: targetPeerId,
+                      profileDbAddress: data.profileDbAddress,
+                      timestamp: Date.now()
+                    });
+                    await pubsub.publish(CONFIG.TOPICS.PROFILE_UPDATES_TOPIC, new TextEncoder().encode(profileUpdatePayload));
+                    console.log(`📢 [RPC-Register] Анонс обновления профиля отправлен в ${CONFIG.TOPICS.PROFILE_UPDATES_TOPIC}`);
+                  } catch (pubErr) {
+                    console.error('⚠️ [RPC-Register] Не удалось отправить бродкаст профиля:', pubErr.message);
+                  }
+                }
+              }
               
               responseStatus = isAllowed ? CONFIG.MSG.SUCCESS : CONFIG.MSG.FORBIDDEN;
               responseMessage = isAllowed ? CONFIG.MSG.REG_IS_OVER : CONFIG.MSG.LIMIT_EXCEEDED;
@@ -78,17 +105,17 @@ export function setupAntiFloodProtocol(libp2p, pubsub, archivist) {
               } catch (err) {
                 console.error('❌ [LIVE-SYNC] Ошибка отправки бродкаста:', err.message);
               }
+
             // ==========================================
             // Обработка ВХОДА
             // ==========================================
             } else if (data.action === 'LOGIN') {
-              console.log(`🔑 [Protocol] Проверяем вход для БД: ${data.profileDbAddress?.slice(0, 15)}...`);
+              console.log(`🔑 [Protocol] Проверяем вход для БД: ${data.profileDbAddress?.slice(-12)}...`);
               
               // Проверяем БД на наличие профиля
               const userExists = checkIfProfileExists(data.profileDbAddress);
 
               if (userExists) {
-                // ВАЖНО: Добавили коннект при логине!
                 if (data.clientMultiaddr) {
                   console.log(`🔗 [Архивариус] Пытаюсь соединиться с клиентом: ${data.clientMultiaddr}`);
                   await libp2p.dial(multiaddr(data.clientMultiaddr)).catch(e => console.error('Не смог подконнектиться к клиенту:', e));
@@ -99,7 +126,7 @@ export function setupAntiFloodProtocol(libp2p, pubsub, archivist) {
                 console.log(`✅ [Protocol] Пользователь найден в БД, вход разрешен.`);
                 responseStatus = CONFIG.MSG.SUCCESS;
                 responseMessage = CONFIG.MSG.LOGIN_SUCCESS;
-              }else {
+              } else {
                 console.warn(`⚠️ [Protocol] Отказ во входе: профиль не зарегистрирован.`);
                 responseStatus = CONFIG.MSG.NOT_FOUND;
                 responseMessage = CONFIG.MSG.PROFILE_NOT_FOUND;
@@ -149,47 +176,46 @@ export function setupAntiFloodProtocol(libp2p, pubsub, archivist) {
 }
 
 export async function registerAnnounceProtocol(node, archivist, pendingRequests) {
-    await node.handle(CONFIG.TOPICS.ANNOUNCE, async ({ stream }) => {
-      const remotePeerId = stream.remotePeer;
-      try {
-        const { pipe } = await import('it-pipe');
-        await pipe(
-          stream,
-          async function (source) {
-            for await (const buf of source) {
-              const decoded = new TextDecoder().decode(buf.subarray()).trim();
-              try {
-                const parsed = JSON.parse(decoded);
-                const targetAddress = (typeof parsed === 'string') ? parsed : parsed.address;
+  await node.handle(CONFIG.TOPICS.ANNOUNCE, async ({ stream }) => {
+    const remotePeerId = stream.remotePeer;
+    try {
+      const { pipe } = await import('it-pipe');
+      await pipe(
+        stream,
+        async function (source) {
+          for await (const buf of source) {
+            const decoded = new TextDecoder().decode(buf.subarray()).trim();
+            try {
+              const parsed = JSON.parse(decoded);
+              const targetAddress = (typeof parsed === 'string') ? parsed : parsed.address;
+              
+              if (targetAddress) {
+                const now = Date.now();
+                if (pendingRequests.has(targetAddress)) {
+                  const lastSeen = pendingRequests.get(targetAddress);
+                  if (now - lastSeen < CONFIG.DELAY_START_MS) return;  
+                }
+
+                pendingRequests.set(targetAddress, now);
+                console.log(`🏠 [Protocol] Запрос на архивацию БД: ${targetAddress}`);
                 
-                if (targetAddress) {
-                  const now = Date.now();
-                  if (pendingRequests.has(targetAddress)) {
-                    const lastSeen = pendingRequests.get(targetAddress);
-                    if (now - lastSeen < CONFIG.DELAY_START_MS) return;  
-                  }
-  
-                  pendingRequests.set(targetAddress, now);
-                  console.log(`🏠 [Protocol] Запрос на архивацию БД: ${targetAddress}`);
-                  
-                  archivist.pinRoom(targetAddress, remotePeerId).catch(err => {
-                    console.error('❌ Ошибка фонового открытия БД:', err);
-                  });
-                }
-              } catch (e) {
-                if (decoded) {
-                  console.log(`🏠 [Protocol] Запрос на архивацию БД (raw): ${decoded}`);
-                  archivist.pinRoom(decoded).catch(err => console.error(err));
-                }
+                archivist.pinRoom(targetAddress, remotePeerId).catch(err => {
+                  console.error('❌ Ошибка фонового открытия БД:', err);
+                });
+              }
+            } catch (e) {
+              if (decoded) {
+                console.log(`🏠 [Protocol] Запрос на архивацию БД (raw): ${decoded}`);
+                archivist.pinRoom(decoded).catch(err => console.error(err));
               }
             }
           }
-        );
-      } catch (err) {
-        console.error(`❌ [Protocol] Ошибка стрима: ${err.message}`);
-      }
-    }, {
-      runOnTransientConnection: true
+        }
+      );
+    } catch (err) {
+      console.error(`❌ [Protocol] Ошибка стрима: ${err.message}`);
     }
-  );
+  }, {
+    runOnTransientConnection: true
+  });
 }

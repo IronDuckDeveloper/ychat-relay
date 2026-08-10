@@ -52,7 +52,7 @@ export function checkAndLogRegistration(ip, deviceHash, profileAddress) {
 
   // 3. Проверяем жесткий лимит (не более 3 регистраций в год)
   if (ipCountRow.count >= CONFIG.SQL.MAX_REGISTRATIONS || deviceCountRow.count >= CONFIG.SQL.MAX_REGISTRATIONS) {
-    console.warn(`🚨 [Anti-Fraud] Отклонено! Превышен лимит. IP: ${ip} (Рег: ${ipCountRow.count}), FP: ${deviceHash.slice(0, 10)}... (Рег: ${deviceCountRow.count})`);
+    console.warn(`🚨 [Anti-Fraud] Отклонено! Превышен лимит. IP: ${ip} (Рег: ${ipCountRow.count}), FP: ${deviceHash.slice(-12)}... (Рег: ${deviceCountRow.count})`);
     return false;
   }
 
@@ -62,7 +62,7 @@ export function checkAndLogRegistration(ip, deviceHash, profileAddress) {
   );
   insert.run(ip, deviceHash, profileAddress, now);
 
-  console.log(`✅ [Anti-Fraud] Регистрация одобрена и залогирована. IP: ${ip}, Profile: ${profileAddress?.slice(0, 15)}...`);
+  console.log(`✅ [Anti-Fraud] Регистрация одобрена и залогирована. IP: ${ip}, Profile: ${profileAddress?.slice(-12)}...`);
   return true;
 }
 

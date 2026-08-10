@@ -69,7 +69,7 @@ export function setupDatabaseSyncProtocol(node) {
               stream.sink
             );
             
-            console.log(`📤 [DB-SYNC] Успешно завершена отправка для ${connection.remotePeer.toString().slice(-6)}`);
+            console.log(`📤 [DB-SYNC] Успешно завершена отправка для ${connection.remotePeer.toString().slice(-12)}`);
             break; // Обработали запрос, выходим из цикла чтения
           }
         }

@@ -7,7 +7,7 @@ import { loadKnownPeersConfig, saveKnownPeersConfig } from '../storage/peers-con
 import { generateAuthToken } from '../utils/crypto.js';
 import { mergeRegistrations } from '../database/db.js'; // <-- Добавь эту строку
 
-export function setupPubSubHandlers(node, pubsub, archivistService = null, orbitdb = null) {
+export function setupPubSubHandlers(node, pubsub, archivistService = null, globalRegistryDb = null) {
   pubsub.addEventListener('message', async (evt) => {
     const msg = evt.detail || evt;
     const { topic, data, from } = msg;
@@ -28,18 +28,18 @@ export function setupPubSubHandlers(node, pubsub, archivistService = null, orbit
         const { timestamp, auth } = payload;
         
         if (!timestamp || !auth) {
-          console.warn(`🔒 [PEER-SYNC] Отклонено от ${target.slice(-6)}: попытка изменить список релеев без авторизации.`);
+          console.warn(`🔒 [PEER-SYNC] Отклонено от ${target.slice(-12)}: попытка изменить список релеев без авторизации.`);
           // ВАЖНО: здесь мы не делаем глобальный return, 
           // а просто пропускаем блок добавления в базу!
         } else {
           // Проверяем токен
           const timeDifference = Math.abs(Date.now() - timestamp);
           if (timeDifference > CONFIG.LIVE_STAMP_TOKEN) {
-            console.warn(`🔒 [PEER-SYNC] Токен устарел от ${target.slice(-6)}`);
+            console.warn(`🔒 [PEER-SYNC] Токен устарел от ${target.slice(-12)}`);
           } else {
             const expectedAuth = generateAuthToken(timestamp, CONFIG.SECURITY.clusterSecret);
             if (auth !== expectedAuth) {
-              console.warn(`🔒 [PEER-SYNC] КРИТИЧЕСКАЯ ОШИБКА: неверный пароль от ${target.slice(-6)}!`);
+              console.warn(`🔒 [PEER-SYNC] КРИТИЧЕСКАЯ ОШИБКА: неверный пароль от ${target.slice(-12)}!`);
             } else {
               // ✅ Пароль совпал, обновляем базу релеев
               const current = loadKnownPeersConfig();
@@ -65,6 +65,19 @@ export function setupPubSubHandlers(node, pubsub, archivistService = null, orbit
                 console.log(`🆕 [PEER-SYNC] Добавлен новый узел: ${payload.relay.name}`);
               }
               saveKnownPeersConfig(current);
+
+              // ==========================================
+              // 🔥 ВЫДАЕМ ПРАВО ЗАПИСИ ДОВЕРЕННОМУ РЕЛЕЮ В РЕЕСТР:
+              // ==========================================
+              // 🔥 Изменение: проверяем и выдаем права именно на orbitDbIdentity (zdpu...)
+              if (globalRegistryDb && payload.relay.orbitDbIdentity) {
+                try {
+                  await globalRegistryDb.access.grant('write', payload.relay.orbitDbIdentity);
+                  console.log(`🔐 [Registry] Выдано право записи релею ${payload.relay.name}: ${payload.relay.orbitDbIdentity}`);
+                } catch (err) {
+                  console.error('❌ [Registry] Ошибка выдачи прав:', err.message);
+                }
+              }
             }
           }
         }
@@ -72,20 +85,23 @@ export function setupPubSubHandlers(node, pubsub, archivistService = null, orbit
 
       // 2. БЛОК ЧТЕНИЯ (Выполняется ВСЕГДА, отдаем список всем: и релеям, и клиентам-браузерам)
       const config = loadKnownPeersConfig();
-      const responseTopic = `${CONFIG.TOPICS.PEER_SYNC_RESPONSE_BASE}${target}`;
+      const responseTopic = `${CONFIG.TOPICS.PEER_SYNC_RESPONSE_BASE}`;
       
       const resTimestamp = Date.now();
       // Сервер подписывает свой ответ, чтобы другие релеи знали, что список легитимный
       const resAuth = generateAuthToken(resTimestamp, CONFIG.SECURITY.clusterSecret);
 
       const responsePayload = JSON.stringify({ 
+        to: target,
         relays: config.relays,
+        // Отдаем реальный сгенерированный адрес глобального реестра
+        globalRegistryAddress: CONFIG.GLOBAL_REGISTRY_ADDRESS,
         timestamp: resTimestamp,
         auth: resAuth
       });
 
       await pubsub.publish(responseTopic, new TextEncoder().encode(responsePayload));
-      console.log(`📤 [PEER-SYNC] Отправлен список пиров для ${target.slice(-6)}`);
+      console.log(`📤 [PEER-SYNC] Отправлен список пиров для ${target.slice(-12)} (DB: ${CONFIG.GLOBAL_REGISTRY_ADDRESS})`);
       
     } catch (e) {
       console.error('❌ Ошибка в PEER_SYNC_REQUEST:', e.message);
@@ -119,7 +135,7 @@ export function setupPubSubHandlers(node, pubsub, archivistService = null, orbit
         // 4. Если всё чисто — сливаем с нашей БД
         // mergeRegistrations ожидает массив, поэтому оборачиваем record в [ ]
         mergeRegistrations([record]);
-        console.log(`⚡ [LIVE-SYNC] Новая регистрация синхронизирована (БД: ${record.profile_address?.slice(0, 10)}...)`);
+        console.log(`⚡ [LIVE-SYNC] Новая регистрация синхронизирована (БД: ${record.profile_address?.slice(-12)}...)`);
       } catch (err) {
         console.error('❌ [LIVE-SYNC] Ошибка обработки бродкаста:', err.message);
       }
@@ -135,18 +151,23 @@ export function setupPubSubHandlers(node, pubsub, archivistService = null, orbit
         // Иначе игнорируются клиенты, которые обновили только никнейм.
         if (payload.type === CONFIG.MSG.PROFILE_UPDATED) {
 
-          // ПИННИНГ БАЗЫ ДАННЫХ ПРОФИЛЯ
-          if (payload.profileDbAddress && orbitdb) {
+          // 1. ЗАПИСЫВАЕМ СВЯЗКУ PEER_ID -> ADDRESS В ГЛОБАЛЬНЫЙ РЕЕСТР
+          if (globalRegistryDb && payload.senderId && payload.profileDbAddress) {
+            await globalRegistryDb.put(payload.senderId, payload.profileDbAddress);
+            console.log(`📇 [Registry] Записан профиль: ${payload.senderId.slice(-12)} -> ${payload.profileDbAddress}`);
+          }
+
+          // 2. ПИННИНГ БАЗЫ ДАННЫХ ПРОФИЛЯ (Используем archivistService вместо прямого orbitdb.open)
+          if (payload.profileDbAddress && archivistService) {
             console.log(`🗄️ [PubSub] Обнаружена БД профиля: ${payload.profileDbAddress}. Начинаем синхронизацию...`);
             
-            // Открываем базу на релее. В этот момент OrbitDB сам стянет данные с клиента!
-            orbitdb.open(payload.profileDbAddress).then(() => {
-              console.log(`✅ [Кэш] База профиля ${payload.profileDbAddress} успешно открыта (запинена) на Релее!`);
+            archivistService.pinRoom(payload.profileDbAddress).then(() => {
+              console.log(`✅ [Кэш] База профиля ${payload.profileDbAddress} успешно открыта (запинена) через Архивариус!`);
             }).catch(err => {
-              console.error(`❌ Ошибка открытия БД профиля на Релее:`, err.message);
+              console.error(`❌ Ошибка открытия БД профиля через Архивариус:`, err.message);
             });
-          } else if (payload.profileDbAddress && !orbitdb) {
-            console.warn(`⚠️ [PubSub] Инстанс orbitdb не передан в обработчики, пиннинг БД ${payload.profileDbAddress} невозможен!`);
+          } else if (payload.profileDbAddress && !archivistService) {
+            console.warn(`⚠️ [PubSub] archivistService не передан в обработчики, пиннинг БД ${payload.profileDbAddress} невозможен!`);
           }
         }
       } catch (err) {
@@ -157,12 +178,12 @@ export function setupPubSubHandlers(node, pubsub, archivistService = null, orbit
 
         // Обычные сообщения (чат)
     if (topic.includes('/orbitdb/')) {
-      console.log(`📩 [${topic}] Скрытое сообщение от ${from.toString().slice(-6)}: ${text}`);
+      console.log(`📩 [${topic}] Скрытое сообщение от ${from.toString().slice(-12)}: ${text}`);
       return;
     }
     // Обычные сообщения (чат)
     if (!topic.includes('sync')) {
-      console.log(`📩 [${topic}] Сообщение от ${from.toString().slice(-6)}: ${text}`);
+      console.log(`📩 [${topic}] Сообщение от ${from.toString().slice(-12)}: ${text}`);
       return;
     }
 
@@ -172,10 +193,12 @@ export function setupPubSubHandlers(node, pubsub, archivistService = null, orbit
 // ==========================================
 // ИНИЦИАЦИЯ ЗАПРОСА СИНХРОНИЗАЦИИ (Outgoing Request)
 // ==========================================
-export async function requestPeerSync(node, pubsub) {
+export async function requestPeerSync(node, pubsub, orbitdb = null) {
   const myPeerId = node.peerId.toString();
-  const responseTopic = `${CONFIG.TOPICS.PEER_SYNC_RESPONSE_BASE}${myPeerId}`;
+  const responseTopic = `${CONFIG.TOPICS.PEER_SYNC_RESPONSE_BASE}`;
   let received = false;
+
+  const myOrbitDbIdentity = orbitdb ? orbitdb.identity.id : null;
 
   const onResponse = async (evt) => {
     const msg = evt.detail || evt;
@@ -183,8 +206,7 @@ export async function requestPeerSync(node, pubsub) {
     try {
       const payload = JSON.parse(new TextDecoder().decode(msg.data));
       
-      // 🛡️ ПРОВЕРКА БЕЗОПАСНОСТИ ОТВЕТА СЕРВЕРА
-      const { timestamp, auth, relays } = payload;
+      const { timestamp, auth, relays, globalRegistryAddress } = payload;
       if (!timestamp || !auth || !relays) return;
 
       if (Math.abs(Date.now() - timestamp) > CONFIG.LIVE_STAMP_TOKEN) {
@@ -198,6 +220,12 @@ export async function requestPeerSync(node, pubsub) {
         return;
       }
 
+      // Если мы еще не знаем адрес глобальной БД, сохраняем тот, что прислал соседний релей
+      if (globalRegistryAddress && !CONFIG.GLOBAL_REGISTRY_ADDRESS) {
+        CONFIG.GLOBAL_REGISTRY_ADDRESS = globalRegistryAddress;
+        console.log(`📥 [PEER-SYNC] Получен адрес глобального реестра от соседа: ${globalRegistryAddress}`);
+      }
+
       // Если сервер подтвердил, что знает секрет — берем его пиры
       if (payload.relays) {
         const localConfig = loadKnownPeersConfig();
@@ -205,6 +233,11 @@ export async function requestPeerSync(node, pubsub) {
           if (!localConfig.relays.find(r => r.peerId === remoteRelay.peerId)) {
             localConfig.relays.push(remoteRelay);
             const fullAddr = `${remoteRelay.address}/p2p/${remoteRelay.peerId}`;
+
+            if (r.peerId === pubsub.libp2p.peerId.toString()) {
+              return; // Пропускаем самого себя
+            }
+
             node.dial(multiaddr(fullAddr)).catch(err => {
               console.log(`📡 Не удалось достучаться до ${remoteRelay.name}: ${err.message}`);
             });
@@ -222,18 +255,20 @@ export async function requestPeerSync(node, pubsub) {
   await pubsub.subscribe(responseTopic);
   pubsub.addEventListener('message', onResponse);
 
-  // Генерируем подпись нашего запроса
   const reqTimestamp = Date.now();
   const reqAuth = generateAuthToken(reqTimestamp, CONFIG.SECURITY.clusterSecret);
 
   const reqPayload = JSON.stringify({ 
     from: myPeerId,
     timestamp: reqTimestamp,
-    auth: reqAuth, // Отправляем хэш вместо чистого пароля
+    auth: reqAuth,
     relay: {
       name: CONFIG.NODE_NAME,
       peerId: myPeerId,
-      address: `/ip4/${CONFIG.NETWORK.IP}/tcp/${CONFIG.NETWORK.PORT}/ws`
+      address: `/ip4/${CONFIG.NETWORK.IP}/tcp/${CONFIG.NETWORK.PORT}/ws`,
+      orbitDbIdentity: myOrbitDbIdentity,
+      // Сообщаем другим релеям, какой адрес глобальной БД используем мы
+      globalRegistryAddress: CONFIG.GLOBAL_REGISTRY_ADDRESS
     }
   });
 

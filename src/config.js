@@ -25,8 +25,9 @@ export const CONFIG = {
   ORBITDB_BLOCKS_DIR: './data/blocks.level', // Директория для хранения блоков LevelDB
   DATA_DIR: './data', // Общая директория для всех данных
   KNOWN_PEERS_FILE: './data/known-peers.json', // Файл для хранения известных пиров
+  GLOBAL_REGISTRY_ADDRESS: '', // Адрес глобальной базы профилей (будет установлен при старте)
 
-  DELAY_START_MS: 3000, // АнтиСпам задержка между запросами на одного и того же пира (3 секунды)
+  DELAY_START_MS: 3, // АнтиСпам задержка между запросами на одного и того же пира (3 секунды)
   LIVE_STAMP_TOKEN: 60000, // Время жизни токена для синхронизации пиров (1 минута)
 
   NETWORK: {
@@ -56,7 +57,7 @@ export const CONFIG = {
     DB_PATH: './data/ychat-server.db', // Путь к базе данных
     DB_NAME: 'registration_logs', // Имя базы данных
     ONE_YEAR_MS: 365 * 24 * 60 * 60 * 1000, // Количество миллисекунд в одном году
-    MAX_REGISTRATIONS: 3, // Максимальное количество регистраций на IP/устройство в год
+    MAX_REGISTRATIONS: 300, // Максимальное количество регистраций на IP/устройство в год
     ID_COLUMN: 'id',
     IP: 'ip_address',
     DEVICE_HASH: 'device_hash',
@@ -72,6 +73,7 @@ export const CONFIG = {
     RPC_PROTOCOL: '/ychat/anti-flood/1.0.0', // Протокол для RPC-метода проверки регистрации (антифрод)
     DB_SYNC: '/ychat/db-sync/1.0.0', // Протокол для синхронизации БД между релеями при старте
     DB_LIVE_SYNC: '/ychat/db-live-sync/1.0.0', // Протокол для живой синхронизации БД при добавлении новых записей
+    DB_GLOBAL_SYNC: '/ychat/db-global-sync/1.0.0', // Протокол для глобальной синхронизации БД
   },
 
   ARCHIVIST: {
