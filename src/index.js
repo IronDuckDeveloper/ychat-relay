@@ -8,6 +8,8 @@ import { setupDatabaseSyncProtocol, requestDatabaseSync } from './networking/dbS
 import { safeSubscribe } from './pubsub/subscription.js';
 import { initDatabase } from './database/db.js';
 import { setupAntiFloodProtocol, registerAnnounceProtocol } from './networking/protocols.js';
+import express from 'express';
+import { createCheckUploadHandler } from './routes/checkUpload.js';
 
 async function main() {
   // Сначала поднимаем базу данных
@@ -210,6 +212,17 @@ async function main() {
   }
 
   console.log(`✅ [Registry] Глобальная книга профилей готова! Реальный адрес: ${CONFIG.GLOBAL_REGISTRY_ADDRESS}`);
+  // ==========================================
+
+  // ==========================================
+  // 🆕 HTTP-СЕРВЕР ДЛЯ NGINX AUTH_REQUEST
+  // ==========================================
+  const app = express();
+  app.get('/api/check-upload', createCheckUploadHandler());
+
+  app.listen(CONFIG.NETWORK.HTTP_PORT, () => {
+    console.log(`🌐 [HTTP] Внутренний API-сервер слушает порт ${CONFIG.NETWORK.HTTP_PORT}`);
+  });
   // ==========================================
 
   // 3. Настройка системных обработчиков PubSub и протоколов с уже открытой базой

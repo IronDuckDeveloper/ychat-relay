@@ -1,35 +1,41 @@
-version: '3.8'
-
 services:
   ychat-relay:
     build: .
     container_name: ychat-relay
     restart: unless-stopped
     ports:
-      # Пробрасываем порт из переменной окружения или используем 15003 по умолчанию
-      - "${PORT:-15003}:${PORT:-15003}"
+      - "${PORT:-15003}:${PORT:-15003}"   # только libp2p (websocket P2P), как и было
+      # HTTP_PORT (15004, новый) наружу НЕ пробрасываем — только для nginx-shield внутри docker-сети
     env_file:
       - .env
     volumes:
-      # Привязка локальной папки data к папке внутри контейнера
       - ./data:/usr/src/app/data
 
   ychat-kubo:
     image: ipfs/kubo:latest
     container_name: ychat-kubo
     restart: unless-stopped
-    ports:
-      - "5001:5001"        # RPC API (клиент загружает файлы напрямую сюда)
-      - "8081:8080"        # Gateway (клиент скачивает файлы по HTTP)
+    expose:                # 👈 было ports с проброс на хост — теперь только внутри docker-сети
+      - "5001"
+      - "8080"
     volumes:
-      # Именованные тома Docker для сохранения данных Kubo
       - kubo_data:/data/ipfs
       - kubo_export:/export
       - ./kubo-init.sh:/container-init.d/001-init.sh:ro
 
+  nginx-shield:             # 👈 НОВЫЙ сервис
+    image: nginx:1.27-alpine
+    container_name: nginx-shield
+    restart: unless-stopped
+    depends_on:
+      - ychat-kubo
+      - ychat-relay
+    ports:
+      - "5001:5001"    # публичный вход для загрузки (твой клиент уже бьёт сюда — kuboApiUrl использует :5001)
+      - "8081:8080"    # публичный вход для скачивания (клиент уже использует :8081 в fetchFileFromHelia)
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+
 volumes:
   kubo_data:
   kubo_export:
-
-
-

@@ -9,6 +9,11 @@ if (!process.env.CLUSTER_SECRET) {
   process.exit(1);
 }
 
+if (!process.env.CLIENT_SESSION_SECRET) {
+  console.error('❌ КРИТИЧЕСКАЯ ОШИБКА: Переменная CLIENT_SESSION_SECRET не задана в .env!');
+  process.exit(1);
+}
+
 // 1. Сначала извлекаем IP, чтобы использовать его для NODE_NAME
 const publicIp = process.env.MY_PUBLIC_IP || '127.0.0.1';
 
@@ -33,10 +38,12 @@ export const CONFIG = {
   NETWORK: {
     IP: publicIp, // Защита от undefined
     PORT: parseInt(process.env.PORT || '15003', 10),
+    HTTP_PORT: parseInt(process.env.HTTP_PORT || '15004', 10),
     BOOTSTRAP_LIST: bootstrapPeersArray
   },
   SECURITY: {
-    clusterSecret: process.env.CLUSTER_SECRET
+    clusterSecret: process.env.CLUSTER_SECRET,
+    clientSessionSecret: process.env.CLIENT_SESSION_SECRET,
   },
 
   MSG: {
@@ -46,7 +53,7 @@ export const CONFIG = {
     INCORRECT_ACTION : 'INCORRECT_ACTION',
     INCORRECT_ACTION_MSG : 'Incorrect action provided',
     LOGIN_SUCCESS : 'Login successful',
-    REGISTRATION_IS_OVER : 'Registration allowed',
+    REG_IS_OVER : 'Registration allowed',
     LIMIT_EXCEEDED : 'Registration limit per device/IP exceeded',
     EMPTY_FINGERPRINT : 'Empty fingerprint provided',
     PROFILE_NOT_FOUND : 'Profile not found. Please check that the seed phrase is correct.',
