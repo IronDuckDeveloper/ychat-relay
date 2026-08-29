@@ -29,6 +29,17 @@ export function initDatabase() {
   db.prepare(`CREATE INDEX IF NOT EXISTS idx_device ON ${CONFIG.SQL.DB_NAME}(${CONFIG.SQL.DEVICE_HASH})`).run();
   db.prepare(`CREATE INDEX IF NOT EXISTS idx_profile ON ${CONFIG.SQL.DB_NAME}(${CONFIG.SQL.PROFILE_ADDRESS})`).run();
 
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS banned_users (
+      user_id TEXT PRIMARY KEY,
+      status TEXT NOT NULL DEFAULT 'banned',   -- 'banned' | 'unbanned'
+      reason TEXT,
+      updated_at INTEGER NOT NULL
+    )
+  `).run();
+
+  db.prepare(`CREATE INDEX IF NOT EXISTS idx_ban_updated ON banned_users(updated_at)`).run();
+
   console.log('🗄️ [SQLite] База данных и индексы успешно инициализированы.');
 }
 
@@ -127,4 +138,83 @@ export function mergeRegistrations(records) {
   } catch (err) {
     console.error('❌ [DB] Ошибка при слиянии записей БД:', err);
   }
+}
+
+//////////////////////////////////////////////////
+// Бан, Разбан пользователей                    //
+//////////////////////////////////////////////////
+export function isUserBanned(userId) {
+  if (!userId) return true;
+  const row = db.prepare(`SELECT status FROM banned_users WHERE user_id = ?`).get(userId);
+  return !!row && row.status === 'banned';
+}
+
+export function banUser(userId, reason = 'Не указана') {
+  const updatedAt = Date.now();
+  db.prepare(`
+    INSERT INTO banned_users (user_id, status, reason, updated_at)
+    VALUES (?, 'banned', ?, ?)
+    ON CONFLICT(user_id) DO UPDATE SET
+      status = 'banned',
+      reason = excluded.reason,
+      updated_at = excluded.updated_at
+    WHERE excluded.updated_at > banned_users.updated_at
+  `).run(userId, reason, updatedAt);
+  console.log(`🚫 [Ban] Пользователь ${userId.slice(-12)} забанен. Причина: ${reason}`);
+  return updatedAt;
+}
+
+export function unbanUser(userId) {
+  const updatedAt = Date.now();
+  db.prepare(`
+    INSERT INTO banned_users (user_id, status, reason, updated_at)
+    VALUES (?, 'unbanned', NULL, ?)
+    ON CONFLICT(user_id) DO UPDATE SET
+      status = 'unbanned',
+      reason = NULL,
+      updated_at = excluded.updated_at
+    WHERE excluded.updated_at > banned_users.updated_at
+  `).run(userId, updatedAt);
+  console.log(`✅ [Ban] Пользователь ${userId.slice(-12)} разбанен.`);
+  return updatedAt;
+}
+
+export function getBannedUsers() {
+  return db.prepare(`SELECT * FROM banned_users WHERE status = 'banned' ORDER BY updated_at DESC`).all();
+}
+
+export function getAllBanRecords() {
+  // Для bulk-синхронизации между релеями — отдаём ВСЕ строки (и banned, и unbanned),
+  // чтобы новый релей узнал не только о банах, но и о разбанах, которые уже произошли
+  return db.prepare(`SELECT * FROM banned_users`).all();
+}
+
+export function mergeBanRecords(records) {
+  if (!records || records.length === 0) return 0;
+
+  const upsert = db.prepare(`
+    INSERT INTO banned_users (user_id, status, reason, updated_at)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(user_id) DO UPDATE SET
+      status = excluded.status,
+      reason = excluded.reason,
+      updated_at = excluded.updated_at
+    WHERE excluded.updated_at > banned_users.updated_at
+  `);
+
+  const transaction = db.transaction((rows) => {
+    let applied = 0;
+    for (const row of rows) {
+      if (!row.user_id || !row.status || !row.updated_at) continue;
+      const result = upsert.run(row.user_id, row.status, row.reason ?? null, row.updated_at);
+      if (result.changes > 0) applied++;
+    }
+    return applied;
+  });
+
+  const appliedCount = transaction(records);
+  if (appliedCount > 0) {
+    console.log(`🗄️ [Ban-Sync] Применено обновлений бана: ${appliedCount}`);
+  }
+  return appliedCount;
 }

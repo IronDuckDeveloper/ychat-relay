@@ -10,6 +10,8 @@ import { initDatabase } from './database/db.js';
 import { setupAntiFloodProtocol, registerAnnounceProtocol } from './networking/protocols.js';
 import express from 'express';
 import { createCheckUploadHandler } from './routes/checkUpload.js';
+import { setupBanSyncProtocol, requestBanSync } from './networking/banSync.js';
+import { createInternalBanRoutes } from './routes/internalBan.js';
 
 async function main() {
   // Сначала поднимаем базу данных
@@ -88,6 +90,8 @@ async function main() {
   setupAntiFloodProtocol(node, pubsub, archivist);
   // Подключаем слушатель запросов на БД
   setupDatabaseSyncProtocol(node);
+  // Подключаем слушатель запросов на баны
+  setupBanSyncProtocol(node);
 
   // ==========================================
   // НАСТРОЙКА GRACEFUL SHUTDOWN (БЕЗОПАСНОЕ ВЫКЛЮЧЕНИЕ)
@@ -126,6 +130,7 @@ async function main() {
   await safeSubscribe(pubsub, CONFIG.TOPICS.PEER_SYNC_REQUEST);
   await safeSubscribe(pubsub, CONFIG.TOPICS.DB_LIVE_SYNC);
   await safeSubscribe(pubsub, CONFIG.TOPICS.PROFILE_UPDATES_TOPIC);
+  await safeSubscribe(pubsub, CONFIG.TOPICS.BAN_LIVE_SYNC);
 
   let syncCompleted = false;
 
@@ -158,6 +163,7 @@ async function main() {
           console.log(`🔄 Запрашиваю синхронизацию базы данных у релея: ${remotePeerId.slice(-12)}...`);
           
           await requestDatabaseSync(node, targetAddr);
+          await requestBanSync(node, targetAddr);
         } else {
           console.log(`⚠️ [DB-SYNC] Соединение с релеем ${remotePeerId.slice(-12)} потеряно до начала синхронизации.`);
         }
@@ -218,7 +224,13 @@ async function main() {
   // 🆕 HTTP-СЕРВЕР ДЛЯ NGINX AUTH_REQUEST
   // ==========================================
   const app = express();
+  app.use(express.json());
+  
   app.get('/api/check-upload', createCheckUploadHandler());
+
+  const { banHandler, unbanHandler } = createInternalBanRoutes(pubsub);
+  app.post('/api/internal/ban', banHandler);    
+  app.post('/api/internal/unban', unbanHandler);
 
   app.listen(CONFIG.NETWORK.HTTP_PORT, () => {
     console.log(`🌐 [HTTP] Внутренний API-сервер слушает порт ${CONFIG.NETWORK.HTTP_PORT}`);

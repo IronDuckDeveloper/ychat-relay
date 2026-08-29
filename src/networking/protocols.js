@@ -1,6 +1,6 @@
 import * as lp from 'it-length-prefixed';
 import { pipe } from 'it-pipe';
-import { checkAndLogRegistration, checkIfProfileExists } from '../database/db.js';
+import { checkAndLogRegistration, checkIfProfileExists, isUserBanned } from '../database/db.js';
 import { generateAuthToken } from '../utils/crypto.js';
 import { CONFIG } from '../config.js';
 import { multiaddr } from '@multiformats/multiaddr';
@@ -19,7 +19,7 @@ export function setupAntiFloodProtocol(libp2p, pubsub, archivist, globalRegistry
             const data = JSON.parse(new TextDecoder().decode(chunk.subarray()));
             const clientFingerprint = data.fingerprint;
             const clientIp = data.ipAddress;
-            const targetPeerId = data.peerId || connection?.remotePeer?.toString(); // 👈 поднято наверх — общее для REGISTER и LOGIN
+            const targetPeerId = data.peerId || connection?.remotePeer?.toString();
 
             console.log(`📥 [RPC] Запрос верификации. Действие: ${data.action}, Сетевой IP: ${clientIp}, FP: ${clientFingerprint?.slice(-12)}...`);
 
@@ -35,9 +35,17 @@ export function setupAntiFloodProtocol(libp2p, pubsub, archivist, globalRegistry
 
             let responseStatus = CONFIG.MSG.FORBIDDEN;
             let responseMessage = CONFIG.MSG.LIMIT_EXCEEDED;
-            let sessionToken = null; // 👈 НОВОЕ
+            let sessionToken = null;
 
-            if (data.action === 'REGISTER') {
+            // ==========================================
+            // 🚫 Проверка бана — до ветвления по action, покрывает REGISTER и LOGIN разом
+            // ==========================================
+            if (targetPeerId && isUserBanned(targetPeerId)) {
+              console.warn(`🚫 [Protocol] Забаненный пользователь ${targetPeerId.slice(-12)} — действие "${data.action}" отклонено.`);
+              responseStatus = CONFIG.MSG.FORBIDDEN;
+              responseMessage = CONFIG.MSG.USER_BANNED;
+
+            } else if (data.action === 'REGISTER') {
               const isAllowed = checkAndLogRegistration(clientIp, clientFingerprint, data.profileDbAddress);
 
               if (isAllowed && data.profileDbAddress) {
@@ -77,7 +85,7 @@ export function setupAntiFloodProtocol(libp2p, pubsub, archivist, globalRegistry
               responseMessage = isAllowed ? CONFIG.MSG.REG_IS_OVER : CONFIG.MSG.LIMIT_EXCEEDED;
 
               if (isAllowed && targetPeerId) {
-                sessionToken = issueSessionToken(targetPeerId); // 👈 НОВОЕ
+                sessionToken = issueSessionToken(targetPeerId);
               }
 
               try {
@@ -109,7 +117,7 @@ export function setupAntiFloodProtocol(libp2p, pubsub, archivist, globalRegistry
                 console.log(`✅ [Protocol] Пользователь найден в БД, вход разрешен.`);
                 responseStatus = CONFIG.MSG.SUCCESS;
                 responseMessage = CONFIG.MSG.LOGIN_SUCCESS;
-                sessionToken = issueSessionToken(targetPeerId); // 👈 НОВОЕ
+                sessionToken = issueSessionToken(targetPeerId);
               } else {
                 console.warn(`⚠️ [Protocol] Отказ во входе: профиль не зарегистрирован.`);
                 responseStatus = CONFIG.MSG.NOT_FOUND;
@@ -125,7 +133,7 @@ export function setupAntiFloodProtocol(libp2p, pubsub, archivist, globalRegistry
             const responsePayload = JSON.stringify({
               status: responseStatus,
               message: responseMessage,
-              sessionToken // 👈 НОВОЕ
+              sessionToken
             });
 
             try {
@@ -148,6 +156,8 @@ export function setupAntiFloodProtocol(libp2p, pubsub, archivist, globalRegistry
     runOnTransientConnection: true
   });
 }
+
+// registerAnnounceProtocol — без изменений
 
 export async function registerAnnounceProtocol(node, archivist, pendingRequests) {
   await node.handle(CONFIG.TOPICS.ANNOUNCE, async ({ stream }) => {

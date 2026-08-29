@@ -58,6 +58,7 @@ export const CONFIG = {
     EMPTY_FINGERPRINT : 'Empty fingerprint provided',
     PROFILE_NOT_FOUND : 'Profile not found. Please check that the seed phrase is correct.',
     PROFILE_UPDATED: 'PROFILE_UPDATED', // Сообщение об обновлении профиля
+    USER_BANNED: 'Account has been banned', // Пользователь забанен
   },
 
   SQL: {
@@ -65,11 +66,11 @@ export const CONFIG = {
     DB_NAME: 'registration_logs', // Имя базы данных
     ONE_YEAR_MS: 365 * 24 * 60 * 60 * 1000, // Количество миллисекунд в одном году
     MAX_REGISTRATIONS: 300, // Максимальное количество регистраций на IP/устройство в год
-    ID_COLUMN: 'id',
-    IP: 'ip_address',
-    DEVICE_HASH: 'device_hash',
-    PROFILE_ADDRESS: 'profile_address',
-    TIMESTAMP: 'timestamp'
+    ID_COLUMN: 'id', // Идентификатор
+    IP: 'ip_address', // IP-адрес
+    DEVICE_HASH: 'device_hash', // Хэш устройства
+    PROFILE_ADDRESS: 'profile_address', // Адрес профиля
+    TIMESTAMP: 'timestamp', // Время регистрации
   },
 
   TOPICS: {
@@ -81,6 +82,8 @@ export const CONFIG = {
     DB_SYNC: '/ychat/db-sync/1.0.0', // Протокол для синхронизации БД между релеями при старте
     DB_LIVE_SYNC: '/ychat/db-live-sync/1.0.0', // Протокол для живой синхронизации БД при добавлении новых записей
     DB_GLOBAL_SYNC: '/ychat/db-global-sync/1.0.0', // Протокол для глобальной синхронизации БД
+    BAN_SYNC: '/ychat/ban-sync/1.0.0',           // Протокол для синхронизации банов
+    BAN_LIVE_SYNC: '/ychat/ban-live-sync/1.0.0', // Протокол для живой синхронизации банов
   },
 
   ARCHIVIST: {

@@ -5,7 +5,7 @@ import { peerIdFromString } from '@libp2p/peer-id'; // Убедись, что и
 import { CONFIG } from '../config.js';
 import { loadKnownPeersConfig, saveKnownPeersConfig } from '../storage/peers-config.js';
 import { generateAuthToken } from '../utils/crypto.js';
-import { mergeRegistrations } from '../database/db.js'; // <-- Добавь эту строку
+import { mergeRegistrations, mergeBanRecords } from '../database/db.js'; // <-- Добавь эту строку
 
 export function setupPubSubHandlers(node, pubsub, archivistService = null, globalRegistryDb = null) {
   pubsub.addEventListener('message', async (evt) => {
@@ -140,6 +140,35 @@ export function setupPubSubHandlers(node, pubsub, archivistService = null, globa
         console.error('❌ [LIVE-SYNC] Ошибка обработки бродкаста:', err.message);
       }
       return; // Важно выйти, чтобы сообщение не обрабатывалось дальше
+    }
+
+    // ==========================================
+    // 🚫 ОБРАБОТКА ЖИВОЙ СИНХРОНИЗАЦИИ БАНОВ (Incoming Live Sync)
+    // ==========================================
+    if (topic === CONFIG.TOPICS.BAN_LIVE_SYNC) {
+      try {
+        const payload = JSON.parse(text);
+        const { timestamp, auth, record } = payload;
+
+        if (!timestamp || !auth || !record) return;
+
+        if (Math.abs(Date.now() - timestamp) > 60000) {
+          console.warn('🔒 [Ban-Live-Sync] Отклонен устаревший бродкаст');
+          return;
+        }
+
+        const expectedAuth = generateAuthToken(timestamp, CONFIG.SECURITY.clusterSecret);
+        if (auth !== expectedAuth) {
+          console.error('🔒 [Ban-Live-Sync] КРИТИЧЕСКАЯ ОШИБКА: Неверная подпись кластера!');
+          return;
+        }
+
+        mergeBanRecords([record]);
+        console.log(`⚡ [Ban-Live-Sync] Синхронизировано изменение бана: ${record.user_id?.slice(-12)} -> ${record.status}`);
+      } catch (err) {
+        console.error('❌ [Ban-Live-Sync] Ошибка обработки бродкаста:', err.message);
+      }
+      return;
     }
 
     // ==========================================

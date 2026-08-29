@@ -1,11 +1,6 @@
 import { verifySessionToken } from '../utils/sessionToken.js';
+import { isUserBanned } from '../database/db.js';
 
-/**
- * Шаг 2: проверяем подпись x-session-token вместо простого поиска
- * userId в реестре. Валидная подпись уже доказывает, что токен выдан
- * релеем при успешном REGISTER/LOGIN именно этому peerId — отдельный
- * запрос к globalRegistryDb больше не нужен.
- */
 export function createCheckUploadHandler() {
   return async function checkUploadHandler(req, res) {
     const token = req.headers['x-session-token'];
@@ -17,6 +12,11 @@ export function createCheckUploadHandler() {
     if (!userId) {
       console.warn('⚠️ [Upload-Check] Невалидный или просроченный токен.');
       return res.status(401).send('Invalid or expired token');
+    }
+
+    if (isUserBanned(userId)) {
+      console.warn(`🚫 [Upload-Check] Забаненный пользователь ${userId.slice(-12)} пытался загрузить файл.`);
+      return res.status(403).send('User banned');
     }
 
     console.log(`✅ [Upload-Check] Разрешена загрузка для ${userId.slice(-12)}`);
