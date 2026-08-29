@@ -12,6 +12,8 @@ import express from 'express';
 import { createCheckUploadHandler } from './routes/checkUpload.js';
 import { setupBanSyncProtocol, requestBanSync } from './networking/banSync.js';
 import { createInternalBanRoutes } from './routes/internalBan.js';
+import { createRegisterFileHandler } from './routes/registerFile.js';
+import { createDeleteFileHandler } from './routes/deleteFile.js';
 
 async function main() {
   // Сначала поднимаем базу данных
@@ -231,6 +233,8 @@ async function main() {
   const { banHandler, unbanHandler } = createInternalBanRoutes(pubsub);
   app.post('/api/internal/ban', banHandler);    
   app.post('/api/internal/unban', unbanHandler);
+  app.post('/api/register-file', createRegisterFileHandler());
+  app.post('/api/delete-file', createDeleteFileHandler());
 
   app.listen(CONFIG.NETWORK.HTTP_PORT, () => {
     console.log(`🌐 [HTTP] Внутренний API-сервер слушает порт ${CONFIG.NETWORK.HTTP_PORT}`);

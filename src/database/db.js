@@ -40,6 +40,16 @@ export function initDatabase() {
 
   db.prepare(`CREATE INDEX IF NOT EXISTS idx_ban_updated ON banned_users(updated_at)`).run();
 
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS file_owners (
+      cid TEXT PRIMARY KEY,
+      owner_id TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    )
+  `).run();
+
+  db.prepare(`CREATE INDEX IF NOT EXISTS idx_file_owner ON file_owners(owner_id)`).run();
+
   console.log('🗄️ [SQLite] База данных и индексы успешно инициализированы.');
 }
 
@@ -217,4 +227,34 @@ export function mergeBanRecords(records) {
     console.log(`🗄️ [Ban-Sync] Применено обновлений бана: ${appliedCount}`);
   }
   return appliedCount;
+}
+
+/**
+ * Закрепляет CID за пользователем при первой регистрации.
+ * INSERT OR IGNORE — если запись уже есть, повторный вызов ничего не меняет
+ * (первый зарегистрировавший CID считается владельцем).
+ */
+export function registerFileOwner(cid, ownerId) {
+  if (!cid || !ownerId) return false;
+  try {
+    const result = db.prepare(`
+      INSERT OR IGNORE INTO file_owners (cid, owner_id, created_at)
+      VALUES (?, ?, ?)
+    `).run(cid, ownerId, Date.now());
+    return result.changes > 0;
+  } catch (err) {
+    console.error('❌ [DB] Ошибка регистрации владельца файла:', err);
+    return false;
+  }
+}
+
+export function getFileOwner(cid) {
+  if (!cid) return null;
+  const row = db.prepare(`SELECT owner_id FROM file_owners WHERE cid = ?`).get(cid);
+  return row ? row.owner_id : null;
+}
+
+export function deleteFileOwnerRecord(cid) {
+  if (!cid) return;
+  db.prepare(`DELETE FROM file_owners WHERE cid = ?`).run(cid);
 }
