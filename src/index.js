@@ -1,5 +1,5 @@
 import './errors.js';
-import { createOrbitDB, Identities, OrbitDBAccessController } from '@orbitdb/core';
+import { createOrbitDB, Identities, OrbitDBAccessController, useAccessController } from '@orbitdb/core';
 import { CONFIG } from './config.js';
 import { createRelayNode } from './networking/node.js';
 import { ArchivistService } from '../services/ArchivistService.js';
@@ -14,6 +14,7 @@ import { setupBanSyncProtocol, requestBanSync } from './networking/banSync.js';
 import { createInternalBanRoutes } from './routes/internalBan.js';
 import { createRegisterFileHandler } from './routes/registerFile.js';
 import { createDeleteFileHandler } from './routes/deleteFile.js';
+import { RateLimitedAccessController } from './access-controllers/rateLimitedAccessController.js';
 
 async function main() {
   // Сначала поднимаем базу данных
@@ -34,6 +35,13 @@ async function main() {
     // Настройки хранилища без внешних роутеров
     }
   });
+
+  // 🛡️ Регистрируем кастомный AccessController с антиспам-лимитом — ДО
+  // первого orbitdb.open(). Комнаты чатов создаются клиентами с этим типом
+  // AC; без регистрации релей не сможет их открыть/запинить — getAccessController()
+  // в orbitdb.js бросит "AccessController type '...' is not supported", а эта ошибка
+  // не входит в список retry-условий в ArchivistService.pinRoom.
+  useAccessController(RateLimitedAccessController);
 
   // =========================================================================
   // 🔥 ГЛОБАЛЬНЫЙ ПУЛ И ДЕДУПЛИКАЦИЯ ORBITDB.OPEN (In-Flight Deduplication)
@@ -99,7 +107,7 @@ async function main() {
   // НАСТРОЙКА GRACEFUL SHUTDOWN (БЕЗОПАСНОЕ ВЫКЛЮЧЕНИЕ)
   // ==========================================
   async function gracefulShutdown() { 
-    console.log('\n🛑 [Релей] Получен сигнал выключения. Закрываем базы данных и останавливаем сетевые узлы...');
+    console.log('\n🔍 [Релей] Получен сигнал выключения. Закрываем базы данных и останавливаем сетевые узлы...');
     try { 
       if (archivist) {
         archivist.stop();
