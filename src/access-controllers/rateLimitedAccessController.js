@@ -37,7 +37,13 @@ export const RateLimitedAccessController = (options = {}) => {
       if (!writerIdentity) return false;
       const id = writerIdentity.id;
 
-      // 2. Защита от гигантских сообщений
+      // 2.1. Проверяет, что запись принадлежит этому пользователю (ключ начинается с msg_<peerId>_).
+      if (key && !key.startsWith(`msg_${id}_`)) {
+        console.warn(`🚫 [Ownership] ${id.slice(-12)} пытается изменить чужой ключ ${key}`);
+        return false;
+      }
+
+      // 2.2. Защита от гигантских сообщений — тоже форма спама/DoS на реплику
       const value = entry.payload?.value;
       if (value && typeof value.text === 'string' && value.text.length > MAX_TEXT_LENGTH) {
         console.warn(`🚫 [AntiSpam] Отклонено — слишком длинный текст от ${id.slice(-12)}`);
