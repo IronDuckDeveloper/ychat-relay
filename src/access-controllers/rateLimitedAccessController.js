@@ -12,6 +12,7 @@ const type = 'ychat-rate-limited';
 const MAX_MESSAGES = 15;         // сообщений
 const WINDOW_MS = 10_000;        // за 10 секунд
 const MAX_TEXT_LENGTH = 10_000;  // символов
+const BACKLOG_THRESHOLD_MS = 30_000; // старше 30с от текущего момента — считаем "историей", не живым потоком
 
 /**
  * Обёртка над штатным OrbitDBAccessController с антиспам-проверкой.
@@ -27,8 +28,11 @@ export const RateLimitedAccessController = (options = {}) => {
     const { identities } = params;
 
     const history = new Map();
+    
+    const verifiedHashes = new Set();
 
     const canAppend = async (entry) => {
+      if (verifiedHashes.has(entry.hash)) return true; // уже проверяли эту же запись — не считаем повторно
       // 1. Базовая проверка прав на запись + подписи identity
       const baseAllowed = await base.canAppend(entry);
       if (!baseAllowed) return false;
@@ -36,6 +40,8 @@ export const RateLimitedAccessController = (options = {}) => {
       const writerIdentity = await identities.getIdentity(entry.identity);
       if (!writerIdentity) return false;
       const id = writerIdentity.id;
+
+      const key = entry.payload?.key;
 
       // 2.1. Проверяет, что запись принадлежит этому пользователю (ключ начинается с msg_<peerId>_).
       if (key && !key.startsWith(`msg_${id}_`)) {
@@ -53,16 +59,20 @@ export const RateLimitedAccessController = (options = {}) => {
       // 3. Скользящее окно по времени получения записи (Date.now() на этой
       // машине), а не по полю value.ts, которое легко подделать отправителю
       const now = Date.now();
-      const recent = (history.get(id) || []).filter((t) => now - t < WINDOW_MS);
+      const claimedTs = typeof value?.ts === 'number' ? value.ts : now;
+      const isBacklog = now - claimedTs > BACKLOG_THRESHOLD_MS;
 
-      if (recent.length >= MAX_MESSAGES) {
-        console.warn(`🚫 [AntiSpam] Rate limit: ${id.slice(-12)} — больше ${MAX_MESSAGES} записей за ${WINDOW_MS}мс`);
-        return false;
+      if (!isBacklog) { // 👈 частоту считаем только для "живых" записей
+        const recent = (history.get(id) || []).filter((t) => now - t < WINDOW_MS);
+        if (recent.length >= MAX_MESSAGES) {
+          console.warn(`🚫 [AntiSpam] Rate limit: ${id.slice(-12)} — больше ${MAX_MESSAGES} записей за ${WINDOW_MS}мс`);
+          return false;
+        }
+        recent.push(now);
+        history.set(id, recent);
       }
 
-      recent.push(now);
-      history.set(id, recent);
-
+      verifiedHashes.add(entry.hash);
       return true;
     };
 
