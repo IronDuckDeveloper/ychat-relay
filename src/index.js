@@ -1,5 +1,6 @@
 import './errors.js';
-import { createOrbitDB, Identities, OrbitDBAccessController, useAccessController } from '@orbitdb/core';
+import { createOrbitDB, Identities, OrbitDBAccessController, useAccessController, useIdentityProvider } from '@orbitdb/core';
+import HeliaIdentityProvider from './access-controllers/identity.js';
 import { CONFIG } from './config.js';
 import { createRelayNode } from './networking/node.js';
 import { ArchivistService } from '../services/ArchivistService.js';
@@ -42,6 +43,7 @@ async function main() {
   // в orbitdb.js бросит "AccessController type '...' is not supported", а эта ошибка
   // не входит в список retry-условий в ArchivistService.pinRoom.
   useAccessController(RateLimitedAccessController);
+  useIdentityProvider(HeliaIdentityProvider);
 
   // =========================================================================
   // 🔥 ГЛОБАЛЬНЫЙ ПУЛ И ДЕДУПЛИКАЦИЯ ORBITDB.OPEN (In-Flight Deduplication)
