@@ -6,7 +6,7 @@ import { createRelayNode } from './networking/node.js';
 import { ArchivistService } from '../services/ArchivistService.js';
 import { setupPubSubHandlers, requestPeerSync } from './pubsub/handlers.js';
 import { setupDatabaseSyncProtocol, requestDatabaseSync } from './networking/dbSync.js';
-import { safeSubscribe } from './pubsub/subscription.js';
+import { safeSubscribe, safeUnsubscribe } from './pubsub/subscription.js';
 import { initDatabase } from './database/db.js';
 import { setupAntiFloodProtocol, registerAnnounceProtocol } from './networking/protocols.js';
 import express from 'express';
