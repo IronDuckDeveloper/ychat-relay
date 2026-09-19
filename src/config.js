@@ -84,6 +84,7 @@ export const CONFIG = {
     DB_GLOBAL_SYNC: '/ychat/db-global-sync/1.0.0', // Протокол для глобальной синхронизации БД
     BAN_SYNC: '/ychat/ban-sync/1.0.0',           // Протокол для синхронизации банов
     BAN_LIVE_SYNC: '/ychat/ban-live-sync/1.0.0', // Протокол для живой синхронизации банов
+    PROFILE_MAILBOX_PREFIX: 'ychat/profiles/mailbox/', // Протокол для обмена обновлениями контакта и анонсирования нового сообщения
   },
 
   ARCHIVIST: {

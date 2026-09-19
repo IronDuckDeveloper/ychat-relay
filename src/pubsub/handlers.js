@@ -5,7 +5,20 @@ import { peerIdFromString } from '@libp2p/peer-id'; // Убедись, что и
 import { CONFIG } from '../config.js';
 import { loadKnownPeersConfig, saveKnownPeersConfig } from '../storage/peers-config.js';
 import { generateAuthToken } from '../utils/crypto.js';
-import { mergeRegistrations, mergeBanRecords } from '../database/db.js'; // <-- Добавь эту строку
+import { mergeRegistrations, mergeBanRecords } from '../database/db.js';
+
+
+  // ==========================================
+  // Распарсить JSON и вытащить поле text, с фолбэком на сырую строку, если не распарсилось
+  // ==========================================
+function extractMessagePreview(rawText) {
+  try {
+    const parsed = JSON.parse(rawText);
+    return typeof parsed?.text === 'string' ? parsed.text : rawText;
+  } catch {
+    return rawText;
+  }
+}
 
 export function setupPubSubHandlers(node, pubsub, archivistService = null, globalRegistryDb = null) {
   pubsub.addEventListener('message', async (evt) => {
@@ -205,14 +218,14 @@ export function setupPubSubHandlers(node, pubsub, archivistService = null, globa
       return; // Важно выйти, чтобы не дублировать логи ниже
     }
 
-        // Обычные сообщения (чат)
+      // Обычные сообщения (чат)
     if (topic.includes('/orbitdb/')) {
-      console.log(`📩 [${topic}] Скрытое сообщение от ${from.toString().slice(-12)}: ${text}`);
+      console.log(`📩 [${topic}] Скрытое сообщение от ${from.toString().slice(-12)}: ${extractMessagePreview(text)}`);
       return;
     }
     // Обычные сообщения (чат)
     if (!topic.includes('sync')) {
-      console.log(`📩 [${topic}] Сообщение от ${from.toString().slice(-12)}: ${text}`);
+      console.log(`📩 [${topic}] Сообщение от ${from.toString().slice(-12)}: ${extractMessagePreview(text)}`);
       return;
     }
 

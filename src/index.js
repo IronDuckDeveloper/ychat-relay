@@ -183,6 +183,19 @@ async function main() {
     } else {
       // Это обычный клиент (браузер). Никаких запросов БД!
       console.log(`🤝 Подключен клиент: ${remotePeerId.slice(-12)}.`);
+      await safeSubscribe(pubsub, `${CONFIG.TOPICS.PROFILE_MAILBOX_PREFIX}${remotePeerId}`);
+    }
+  });
+
+  node.addEventListener('peer:disconnect', async (evt) => {
+    const remotePeerId = evt.detail.toString();
+    const isRelay = bootstrapList.some(addr => addr.includes(remotePeerId));
+    if (!isRelay) {
+      // если у пира остались другие живые соединения (напр. второй таб) — не отписываемся
+      const stillConnected = node.getConnections().some(c => c.remotePeer.toString() === remotePeerId);
+      if (!stillConnected) {
+        await safeUnsubscribe(pubsub, `${CONFIG.TOPICS.PROFILE_MAILBOX_PREFIX}${remotePeerId}`);
+      }
     }
   });
 
