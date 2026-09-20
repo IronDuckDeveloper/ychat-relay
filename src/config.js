@@ -85,6 +85,17 @@ export const CONFIG = {
     BAN_SYNC: '/ychat/ban-sync/1.0.0',           // Протокол для синхронизации банов
     BAN_LIVE_SYNC: '/ychat/ban-live-sync/1.0.0', // Протокол для живой синхронизации банов
     PROFILE_MAILBOX_PREFIX: 'ychat/profiles/mailbox/', // Протокол для обмена обновлениями контакта и анонсирования нового сообщения
+    CONTACT_REQUEST_DEPOSIT: '/ychat/contact-request/1.0.0', // Клиент кладёт запрос в контакты на релей
+    CONTACT_REQUEST_FETCH: '/ychat/contact-requests-fetch/1.0.0', // Клиент забирает свои запросы
+    CONTACT_REQUEST_SYNC: '/ychat/contact-requests-sync/1.0.0', // Bulk-синк между релеями при старте
+    CONTACT_REQUEST_LIVE_SYNC: '/ychat/contact-requests-live-sync/1.0.0', // Живой синк между релеями
+  },
+
+  CONTACT_REQUESTS: {
+    TTL_MS: 30 * 24 * 60 * 60 * 1000, // Срок жизни запроса (30 дней)
+    MAX_PER_TARGET: 50,               // Макс. активных запросов на одного получателя
+    MAX_PER_SENDER: 100,              // Макс. активных запросов от одного отправителя
+    MAX_PAYLOAD_BYTES: 4096,
   },
 
   ARCHIVIST: {

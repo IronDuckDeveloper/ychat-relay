@@ -50,6 +50,18 @@ export function initDatabase() {
 
   db.prepare(`CREATE INDEX IF NOT EXISTS idx_file_owner ON file_owners(owner_id)`).run();
 
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS contact_requests (
+      target_id TEXT NOT NULL,
+      sender_id TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      updated_at INTEGER NOT NULL,   -- и для LWW-мержа, и для TTL
+      PRIMARY KEY (target_id, sender_id)
+    )
+  `).run();
+
+  db.prepare(`CREATE INDEX IF NOT EXISTS idx_cr_sender ON contact_requests(sender_id)`).run();
+
   console.log('🗄️ [SQLite] База данных и индексы успешно инициализированы.');
 }
 
@@ -227,6 +239,87 @@ export function mergeBanRecords(records) {
     console.log(`🗄️ [Ban-Sync] Применено обновлений бана: ${appliedCount}`);
   }
   return appliedCount;
+}
+
+//////////////////////////////////////////////////
+// Запросы в контакты (офлайн-доставка)         //
+//////////////////////////////////////////////////
+const crExpiry = () => Date.now() - CONFIG.CONTACT_REQUESTS.TTL_MS;
+
+const CR_UPSERT_SQL = `
+  INSERT INTO contact_requests (target_id, sender_id, payload, updated_at)
+  VALUES (?, ?, ?, ?)
+  ON CONFLICT(target_id, sender_id) DO UPDATE SET
+    payload = excluded.payload,
+    updated_at = excluded.updated_at
+  WHERE excluded.updated_at > contact_requests.updated_at
+`;
+
+// Возвращает запись (для рассылки другим релеям) или null, если превышен лимит
+export function saveContactRequest(targetId, senderId, payload) {
+  const exists = db.prepare(
+    `SELECT 1 FROM contact_requests WHERE target_id = ? AND sender_id = ?`
+  ).get(targetId, senderId);
+
+  if (!exists) {
+    const min = crExpiry();
+    const perTarget = db.prepare(
+      `SELECT COUNT(*) AS c FROM contact_requests WHERE target_id = ? AND updated_at > ?`
+    ).get(targetId, min).c;
+    const perSender = db.prepare(
+      `SELECT COUNT(*) AS c FROM contact_requests WHERE sender_id = ? AND updated_at > ?`
+    ).get(senderId, min).c;
+
+    if (perTarget >= CONFIG.CONTACT_REQUESTS.MAX_PER_TARGET ||
+        perSender >= CONFIG.CONTACT_REQUESTS.MAX_PER_SENDER) {
+      return null;
+    }
+  }
+
+  const updatedAt = Date.now();
+  db.prepare(CR_UPSERT_SQL).run(targetId, senderId, payload, updatedAt);
+  return { target_id: targetId, sender_id: senderId, payload, updated_at: updatedAt };
+}
+
+export function getContactRequestsFor(targetId) {
+  return db.prepare(
+    `SELECT payload FROM contact_requests WHERE target_id = ? AND updated_at > ?`
+  ).all(targetId, crExpiry());
+}
+
+export function getAllContactRequests() {
+  return db.prepare(`SELECT * FROM contact_requests WHERE updated_at > ?`).all(crExpiry());
+}
+
+export function mergeContactRequests(records) {
+  if (!records || records.length === 0) return 0;
+
+  const upsert = db.prepare(CR_UPSERT_SQL);
+  const min = crExpiry();
+
+  const transaction = db.transaction((rows) => {
+    let applied = 0;
+    for (const row of rows) {
+      if (!row.target_id || !row.sender_id || !row.payload || !row.updated_at) continue;
+      if (row.updated_at <= min) continue; // уже протухла
+      const result = upsert.run(row.target_id, row.sender_id, row.payload, row.updated_at);
+      if (result.changes > 0) applied++;
+    }
+    return applied;
+  });
+
+  const appliedCount = transaction(records);
+  if (appliedCount > 0) {
+    console.log(`🗄️ [CR-Sync] Применено запросов в контакты: ${appliedCount}`);
+  }
+  return appliedCount;
+}
+
+export function purgeExpiredContactRequests() {
+  const result = db.prepare(`DELETE FROM contact_requests WHERE updated_at <= ?`).run(crExpiry());
+  if (result.changes > 0) {
+    console.log(`🧹 [ContactRequest] Удалено протухших запросов: ${result.changes}`);
+  }
 }
 
 /**

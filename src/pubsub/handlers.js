@@ -5,8 +5,7 @@ import { peerIdFromString } from '@libp2p/peer-id'; // Убедись, что и
 import { CONFIG } from '../config.js';
 import { loadKnownPeersConfig, saveKnownPeersConfig } from '../storage/peers-config.js';
 import { generateAuthToken } from '../utils/crypto.js';
-import { mergeRegistrations, mergeBanRecords } from '../database/db.js';
-
+import { mergeRegistrations, mergeBanRecords, mergeContactRequests } from '../database/db.js';
 
   // ==========================================
   // Распарсить JSON и вытащить поле text, с фолбэком на сырую строку, если не распарсилось
@@ -180,6 +179,32 @@ export function setupPubSubHandlers(node, pubsub, archivistService = null, globa
         console.log(`⚡ [Ban-Live-Sync] Синхронизировано изменение бана: ${record.user_id?.slice(-12)} -> ${record.status}`);
       } catch (err) {
         console.error('❌ [Ban-Live-Sync] Ошибка обработки бродкаста:', err.message);
+      }
+      return;
+    }
+
+        // ==========================================
+    // 📬 ЖИВАЯ СИНХРОНИЗАЦИЯ ЗАПРОСОВ В КОНТАКТЫ
+    // ==========================================
+    if (topic === CONFIG.TOPICS.CONTACT_REQUEST_LIVE_SYNC) {
+      try {
+        const { timestamp, auth, record } = JSON.parse(text);
+        if (!timestamp || !auth || !record) return;
+
+        if (Math.abs(Date.now() - timestamp) > 60000) {
+          console.warn('🔒 [CR-Live-Sync] Отклонен устаревший бродкаст');
+          return;
+        }
+
+        const expectedAuth = generateAuthToken(timestamp, CONFIG.SECURITY.clusterSecret);
+        if (auth !== expectedAuth) {
+          console.error('🔒 [CR-Live-Sync] КРИТИЧЕСКАЯ ОШИБКА: Неверная подпись кластера!');
+          return;
+        }
+
+        mergeContactRequests([record]);
+      } catch (err) {
+        console.error('❌ [CR-Live-Sync] Ошибка обработки бродкаста:', err.message);
       }
       return;
     }

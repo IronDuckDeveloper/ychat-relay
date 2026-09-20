@@ -7,11 +7,13 @@ import { ArchivistService } from '../services/ArchivistService.js';
 import { setupPubSubHandlers, requestPeerSync } from './pubsub/handlers.js';
 import { setupDatabaseSyncProtocol, requestDatabaseSync } from './networking/dbSync.js';
 import { safeSubscribe, safeUnsubscribe } from './pubsub/subscription.js';
-import { initDatabase } from './database/db.js';
+import { initDatabase, purgeExpiredContactRequests } from './database/db.js';
 import { setupAntiFloodProtocol, registerAnnounceProtocol } from './networking/protocols.js';
 import express from 'express';
 import { createCheckUploadHandler } from './routes/checkUpload.js';
 import { setupBanSyncProtocol, requestBanSync } from './networking/banSync.js';
+import { setupContactRequestSyncProtocol, requestContactRequestSync } from './networking/contactRequestSync.js';
+import { registerContactRequestProtocol, registerContactRequestFetchProtocol } from './networking/contactRequests.js';
 import { createInternalBanRoutes } from './routes/internalBan.js';
 import { createRegisterFileHandler } from './routes/registerFile.js';
 import { createDeleteFileHandler } from './routes/deleteFile.js';
@@ -20,6 +22,9 @@ import { RateLimitedAccessController } from './access-controllers/rateLimitedAcc
 async function main() {
   // Сначала поднимаем базу данных
   initDatabase();
+  purgeExpiredContactRequests();
+
+  setInterval(purgeExpiredContactRequests, 60 * 60 * 1000);
   // 1. Инициализация сетевой ноды (Helia + libp2p)
   const { heliaInstance, bootstrapList } = await createRelayNode();
   const node = heliaInstance.libp2p;
@@ -104,6 +109,10 @@ async function main() {
   setupDatabaseSyncProtocol(node);
   // Подключаем слушатель запросов на баны
   setupBanSyncProtocol(node);
+  // Подключаем слушатель запросов на контакты
+  setupContactRequestSyncProtocol(node);
+  registerContactRequestProtocol(node, pubsub);
+  registerContactRequestFetchProtocol(node);
 
   // ==========================================
   // НАСТРОЙКА GRACEFUL SHUTDOWN (БЕЗОПАСНОЕ ВЫКЛЮЧЕНИЕ)
@@ -143,6 +152,7 @@ async function main() {
   await safeSubscribe(pubsub, CONFIG.TOPICS.DB_LIVE_SYNC);
   await safeSubscribe(pubsub, CONFIG.TOPICS.PROFILE_UPDATES_TOPIC);
   await safeSubscribe(pubsub, CONFIG.TOPICS.BAN_LIVE_SYNC);
+  await safeSubscribe(pubsub, CONFIG.TOPICS.CONTACT_REQUEST_LIVE_SYNC);
 
   let syncCompleted = false;
 
@@ -176,6 +186,7 @@ async function main() {
           
           await requestDatabaseSync(node, targetAddr);
           await requestBanSync(node, targetAddr);
+          await requestContactRequestSync(node, targetAddr);
         } else {
           console.log(`⚠️ [DB-SYNC] Соединение с релеем ${remotePeerId.slice(-12)} потеряно до начала синхронизации.`);
         }
