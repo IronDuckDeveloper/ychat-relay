@@ -99,7 +99,7 @@ export async function createRelayNode() {
           kBucketSize: 20,
           validators: {},
           selectors: {},
-          allowPublishToZeroPeers: true
+          allowPublishToZeroTopicPeers: true
         }),
         ping: ping()
       }

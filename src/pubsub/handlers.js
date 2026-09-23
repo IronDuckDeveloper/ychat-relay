@@ -33,6 +33,7 @@ export function setupPubSubHandlers(node, pubsub, archivistService = null, globa
       try {
         const payload = JSON.parse(text);
         const target = payload?.from;
+        console.log(`📡 [PEER-SYNC] Получен запрос от ${target?.slice(-12)}`);
         if (!target || target === node.peerId.toString()) return;
 
         // 1. БЛОК ЗАПИСИ (Доступен только для других релеев)
@@ -116,7 +117,7 @@ export function setupPubSubHandlers(node, pubsub, archivistService = null, globa
       console.log(`📤 [PEER-SYNC] Отправлен список пиров для ${target.slice(-12)} (DB: ${CONFIG.GLOBAL_REGISTRY_ADDRESS})`);
       
     } catch (e) {
-      console.error('❌ Ошибка в PEER_SYNC_REQUEST:', e.message);
+      console.error(`❌ Ошибка в PEER_SYNC_REQUEST для ${target?.slice(-12) ?? '?'}:`, e.message);
     }
   }
 
@@ -301,7 +302,7 @@ export async function requestPeerSync(node, pubsub, orbitdb = null) {
             localConfig.relays.push(remoteRelay);
             const fullAddr = `${remoteRelay.address}/p2p/${remoteRelay.peerId}`;
 
-            if (r.peerId === pubsub.libp2p.peerId.toString()) {
+            if (remoteRelay.peerId === myPeerId) {
               return; // Пропускаем самого себя
             }
 
