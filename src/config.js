@@ -14,6 +14,11 @@ if (!process.env.CLIENT_SESSION_SECRET) {
   process.exit(1);
 }
 
+if (!process.env.VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY) {
+  console.error('❌ КРИТИЧЕСКАЯ ОШИБКА: VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY не заданы в .env!');
+  process.exit(1);
+}
+
 // 1. Сначала извлекаем IP, чтобы использовать его для NODE_NAME
 const publicIp = process.env.MY_PUBLIC_IP || '127.0.0.1';
 
@@ -44,6 +49,9 @@ export const CONFIG = {
   SECURITY: {
     clusterSecret: process.env.CLUSTER_SECRET,
     clientSessionSecret: process.env.CLIENT_SESSION_SECRET,
+    vapidPublicKey: process.env.VAPID_PUBLIC_KEY,
+    vapidPrivateKey: process.env.VAPID_PRIVATE_KEY,
+    vapidSubject: process.env.VAPID_SUBJECT || 'mailto:admin@ychat-relay.ru',
   },
 
   MSG: {
@@ -89,6 +97,11 @@ export const CONFIG = {
     CONTACT_REQUEST_FETCH: '/ychat/contact-requests-fetch/1.0.0', // Клиент забирает свои запросы
     CONTACT_REQUEST_SYNC: '/ychat/contact-requests-sync/1.0.0', // Bulk-синк между релеями при старте
     CONTACT_REQUEST_LIVE_SYNC: '/ychat/contact-requests-live-sync/1.0.0', // Живой синк между релеями
+    PUSH_SUBSCRIBE: '/ychat/push-subscribe/1.0.0',     // Клиент присылает Web Push подписку
+    PUSH_UNSUBSCRIBE: '/ychat/push-unsubscribe/1.0.0', // Клиент удаляет подписку
+    PUSH_NOTIFY: '/ychat/push-notify/1.0.0', // Клиент присылает Web Push уведомление
+    PUSH_SYNC: '/ychat/push-sync/1.0.0', // Синк между релеями
+    PUSH_LIVE_SYNC: '/ychat/push-live-sync/1.0.0', // Живой синк между релеями
   },
 
   CONTACT_REQUESTS: {
@@ -96,6 +109,11 @@ export const CONFIG = {
     MAX_PER_TARGET: 50,               // Макс. активных запросов на одного получателя
     MAX_PER_SENDER: 100,              // Макс. активных запросов от одного отправителя
     MAX_PAYLOAD_BYTES: 4096,
+  },
+
+  PUSH: {
+    MAX_PER_PEER: 5,       // максимум подписок (устройств) на один peerId
+    MAX_PAYLOAD_BYTES: 1024,
   },
 
   ARCHIVIST: {

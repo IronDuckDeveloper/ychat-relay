@@ -62,6 +62,19 @@ export function initDatabase() {
 
   db.prepare(`CREATE INDEX IF NOT EXISTS idx_cr_sender ON contact_requests(sender_id)`).run();
 
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS push_subscriptions (
+      peer_id TEXT NOT NULL,
+      endpoint TEXT NOT NULL,
+      subscription_json TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active',   -- 'active' | 'removed' — soft-delete для будущей синхронизации между релеями
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (peer_id, endpoint)
+    )
+  `).run();
+
+  db.prepare(`CREATE INDEX IF NOT EXISTS idx_push_peer ON push_subscriptions(peer_id)`).run();
+
   console.log('🗄️ [SQLite] База данных и индексы успешно инициализированы.');
 }
 
@@ -160,6 +173,86 @@ export function mergeRegistrations(records) {
   } catch (err) {
     console.error('❌ [DB] Ошибка при слиянии записей БД:', err);
   }
+}
+
+//////////////////////////////////////////////////
+// Push-подписки (Web Push)                      //
+//////////////////////////////////////////////////
+const PUSH_UPSERT_SQL = `
+  INSERT INTO push_subscriptions (peer_id, endpoint, subscription_json, status, updated_at)
+  VALUES (?, ?, ?, 'active', ?)
+  ON CONFLICT(peer_id, endpoint) DO UPDATE SET
+    subscription_json = excluded.subscription_json,
+    status = 'active',
+    updated_at = excluded.updated_at
+  WHERE excluded.updated_at > push_subscriptions.updated_at
+`;
+
+export function savePushSubscription(peerId, endpoint, subscriptionJson) {
+  const activeCount = db.prepare(
+    `SELECT COUNT(*) AS c FROM push_subscriptions WHERE peer_id = ? AND status = 'active' AND endpoint != ?`
+  ).get(peerId, endpoint).c;
+
+  if (activeCount >= CONFIG.PUSH.MAX_PER_PEER) return null;
+
+  const updatedAt = Date.now();
+  db.prepare(PUSH_UPSERT_SQL).run(peerId, endpoint, subscriptionJson, updatedAt);
+  return { peer_id: peerId, endpoint, subscription_json: subscriptionJson, status: 'active', updated_at: updatedAt };
+}
+
+export function removePushSubscription(peerId, endpoint) {
+  const existing = db.prepare(
+    `SELECT subscription_json FROM push_subscriptions WHERE peer_id = ? AND endpoint = ?`
+  ).get(peerId, endpoint);
+
+  const updatedAt = Date.now();
+  db.prepare(`
+    UPDATE push_subscriptions SET status = 'removed', updated_at = ?
+    WHERE peer_id = ? AND endpoint = ?
+  `).run(updatedAt, peerId, endpoint);
+
+  return { peer_id: peerId, endpoint, subscription_json: existing?.subscription_json || '', status: 'removed', updated_at: updatedAt };
+}
+
+export function getPushSubscriptionsFor(peerId) {
+  return db.prepare(
+    `SELECT endpoint, subscription_json FROM push_subscriptions WHERE peer_id = ? AND status = 'active'`
+  ).all(peerId);
+}
+
+// Для bulk-синхронизации между релеями — отдаём ВСЕ строки (active и removed)
+export function getAllPushSubscriptions() {
+  return db.prepare(`SELECT * FROM push_subscriptions`).all();
+}
+
+export function mergePushSubscriptions(records) {
+  if (!records || records.length === 0) return 0;
+
+  const upsert = db.prepare(`
+    INSERT INTO push_subscriptions (peer_id, endpoint, subscription_json, status, updated_at)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(peer_id, endpoint) DO UPDATE SET
+      subscription_json = excluded.subscription_json,
+      status = excluded.status,
+      updated_at = excluded.updated_at
+    WHERE excluded.updated_at > push_subscriptions.updated_at
+  `);
+
+  const transaction = db.transaction((rows) => {
+    let applied = 0;
+    for (const row of rows) {
+      if (!row.peer_id || !row.endpoint || !row.status || !row.updated_at) continue;
+      const result = upsert.run(row.peer_id, row.endpoint, row.subscription_json || '', row.status, row.updated_at);
+      if (result.changes > 0) applied++;
+    }
+    return applied;
+  });
+
+  const appliedCount = transaction(records);
+  if (appliedCount > 0) {
+    console.log(`🗄️ [Push-Sync] Применено обновлений подписок: ${appliedCount}`);
+  }
+  return appliedCount;
 }
 
 //////////////////////////////////////////////////

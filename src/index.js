@@ -14,6 +14,8 @@ import { createCheckUploadHandler } from './routes/checkUpload.js';
 import { setupBanSyncProtocol, requestBanSync } from './networking/banSync.js';
 import { setupContactRequestSyncProtocol, requestContactRequestSync } from './networking/contactRequestSync.js';
 import { registerContactRequestProtocol, registerContactRequestFetchProtocol } from './networking/contactRequests.js';
+import { registerPushSubscribeProtocol, registerPushUnsubscribeProtocol, registerPushNotifyProtocol } from './networking/pushSubscriptions.js';
+import { setupPushSyncProtocol, requestPushSync } from './networking/pushSync.js';
 import { createInternalBanRoutes } from './routes/internalBan.js';
 import { createRegisterFileHandler } from './routes/registerFile.js';
 import { createDeleteFileHandler } from './routes/deleteFile.js';
@@ -109,10 +111,17 @@ async function main() {
   setupDatabaseSyncProtocol(node);
   // Подключаем слушатель запросов на баны
   setupBanSyncProtocol(node);
+    // Подключаем слушатель запросов на пуш-уведомления
+  setupPushSyncProtocol(node);
   // Подключаем слушатель запросов на контакты
   setupContactRequestSyncProtocol(node);
+  // Подключаем слушатель запросов на контакты
   registerContactRequestProtocol(node, pubsub);
   registerContactRequestFetchProtocol(node);
+  // Подключаем слушатель запросов на пуш-уведомления
+  registerPushNotifyProtocol(node);
+  registerPushSubscribeProtocol(node, pubsub);
+  registerPushUnsubscribeProtocol(node, pubsub);
 
   // ==========================================
   // НАСТРОЙКА GRACEFUL SHUTDOWN (БЕЗОПАСНОЕ ВЫКЛЮЧЕНИЕ)
@@ -153,6 +162,7 @@ async function main() {
   await safeSubscribe(pubsub, CONFIG.TOPICS.PROFILE_UPDATES_TOPIC);
   await safeSubscribe(pubsub, CONFIG.TOPICS.BAN_LIVE_SYNC);
   await safeSubscribe(pubsub, CONFIG.TOPICS.CONTACT_REQUEST_LIVE_SYNC);
+  await safeSubscribe(pubsub, CONFIG.TOPICS.PUSH_LIVE_SYNC);
 
   let syncCompleted = false;
 
@@ -187,6 +197,7 @@ async function main() {
           await requestDatabaseSync(node, targetAddr);
           await requestBanSync(node, targetAddr);
           await requestContactRequestSync(node, targetAddr);
+          await requestPushSync(node, targetAddr);
         } else {
           console.log(`⚠️ [DB-SYNC] Соединение с релеем ${remotePeerId.slice(-12)} потеряно до начала синхронизации.`);
         }
