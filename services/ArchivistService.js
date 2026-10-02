@@ -100,7 +100,14 @@ export class ArchivistService {
     // 📦 2. ПРОВЕРКА КЭША И IN-FLIGHT ПРОМИСОВ
     if (this.activeRooms.has(roomAddress)) {
       console.log(`♻️ [Архивариус] Комната уже активна в сервисе: ${roomAddress.slice(-12)}`);
-      return this.activeRooms.get(roomAddress);
+      const cachedDb = this.activeRooms.get(roomAddress);
+      // Кэшированная БД может сидеть на протухшем соединении (VPN/смена браузера под тем же
+      // peerId). sync() недорогой — пробует досинкаться с текущими живыми пирами без
+      // переоткрытия всей БД
+      // db.sync в этой версии OrbitDB — объект Sync-инстанса, не функция.
+      // replicate() уже проверенно работает — им же пользуется обработчик 'update' ниже
+      cachedDb.replicate?.().catch(() => {});
+      return cachedDb;
     }
 
     if (this.openingPromises.has(roomAddress)) {
@@ -168,13 +175,13 @@ export class ArchivistService {
           console.log('JOIN', peerId);
 
           try {
-            await db.sync?.();
+            await db.replicate?.();
           } catch {}
         });
 
         this.activeRooms.set(roomAddress, db);
 
-        db.events.on('error', (err) => {
+        db.events.on('error', async (err) => {
           if (err.message?.includes('unexpected end of input') 
             // || err.message?.includes('stream reset')
           ) {
@@ -182,6 +189,14 @@ export class ArchivistService {
             return;
           }
           console.error(`[OrbitDB Error] ${roomAddress.slice(-12)}:`, err.message);
+
+          // Зомби-соединение к пиру: OrbitDB продолжает стучаться по мёртвому стриму.
+          // Выкидываем из кэша, чтобы следующий pinRoom() открыл БД заново, а не вернул
+          // протухший инстанс
+          if (err.message?.includes('protocol selection failed')) {
+            this.activeRooms.delete(roomAddress);
+            try { await db.close(); } catch {}
+          }
         });
         
         return db;
