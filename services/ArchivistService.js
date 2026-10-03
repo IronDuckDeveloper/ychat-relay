@@ -140,12 +140,9 @@ export class ArchivistService {
             
             console.log(`✅ Успешно открыта: ${roomAddress}`);
             // Принудительная репликация при каждом обновлении
-            db.events.on('update', async (entry) => {
-              console.log(`[UPDATE] ${roomAddress.slice(-12)}`);      
-              // Форсируем распространение
-              try {
-                await db.replicate();
-              } catch (e) {}
+            db.events.on('join', async (peerId) => {
+              console.log(`JOIN ${roomAddress.slice(-12)} <- ${peerId.toString().slice(-12)}`);
+              try { await db.replicate?.(); } catch {}
             });
             break;
           } catch (err) {
