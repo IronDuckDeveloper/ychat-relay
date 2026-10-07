@@ -20,6 +20,7 @@ import { createInternalBanRoutes } from './routes/internalBan.js';
 import { createRegisterFileHandler } from './routes/registerFile.js';
 import { createDeleteFileHandler } from './routes/deleteFile.js';
 import { RateLimitedAccessController } from './access-controllers/rateLimitedAccessController.js';
+import { GroupAccessController } from './access-controllers/groupAccessController.js';
 
 async function main() {
   // Сначала поднимаем базу данных
@@ -51,6 +52,7 @@ async function main() {
   // не входит в список retry-условий в ArchivistService.pinRoom.
   useAccessController(RateLimitedAccessController);
   useIdentityProvider(HeliaIdentityProvider);
+  useAccessController(GroupAccessController);
 
   // =========================================================================
   // 🔥 ГЛОБАЛЬНЫЙ ПУЛ И ДЕДУПЛИКАЦИЯ ORBITDB.OPEN (In-Flight Deduplication)
