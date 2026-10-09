@@ -14,7 +14,7 @@ const MAX_ACT_BYTES = 2_048;
 // Должен совпадать с типами событий в groupState.ts (следующий шаг)
 const ACT_TYPES = new Set([
   'add', 'kick', 'ban', 'unban', 'role', 'write',
-  'leave', 'profile', 'group', 'del_msg', 'transfer', 'close',
+  'leave', 'profile', 'group', 'del_msg', 'transfer', 'close', 'join',
 ]);
 
 export const GroupAccessController = () => async (params) => {
