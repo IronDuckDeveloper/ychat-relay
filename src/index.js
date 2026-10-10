@@ -21,6 +21,7 @@ import { createRegisterFileHandler } from './routes/registerFile.js';
 import { createDeleteFileHandler } from './routes/deleteFile.js';
 import { RateLimitedAccessController } from './access-controllers/rateLimitedAccessController.js';
 import { GroupAccessController } from './access-controllers/groupAccessController.js';
+import { setupGroupPingBridge } from './pubsub/groupPing.js';
 
 async function main() {
   // Сначала поднимаем базу данных
@@ -165,6 +166,8 @@ async function main() {
   await safeSubscribe(pubsub, CONFIG.TOPICS.BAN_LIVE_SYNC);
   await safeSubscribe(pubsub, CONFIG.TOPICS.CONTACT_REQUEST_LIVE_SYNC);
   await safeSubscribe(pubsub, CONFIG.TOPICS.PUSH_LIVE_SYNC);
+  // Ping-топики групп: релей подписывается на них, пока есть подписанные клиенты
+  setupGroupPingBridge(pubsub, (id) => bootstrapList.some((addr) => addr.includes(id)));
 
   let syncCompleted = false;
 
