@@ -102,6 +102,8 @@ export const CONFIG = {
     PUSH_NOTIFY: '/ychat/push-notify/1.0.0', // Клиент присылает Web Push уведомление
     PUSH_SYNC: '/ychat/push-sync/1.0.0', // Синк между релеями
     PUSH_LIVE_SYNC: '/ychat/push-live-sync/1.0.0', // Живой синк между релеями
+    PUSH_NOTIFY_GROUP: '/ychat/push-notify-group/1.0.0',
+    PUSH_MUTE: '/ychat/push-mute/1.0.0',
   },
 
   CONTACT_REQUESTS: {
@@ -114,6 +116,11 @@ export const CONFIG = {
   PUSH: {
     MAX_PER_PEER: 5,       // максимум подписок (устройств) на один peerId
     MAX_PAYLOAD_BYTES: 1024,
+    MAX_MUTED: 500,
+    GROUP_CONCURRENCY: 20,
+    GROUP_SENDER_COOLDOWN_MS: 3000,   // пауза на пару (отправитель, группа)
+    GROUP_TARGET_COOLDOWN_MS: 6000,  // не чаще 6 секунд на получателя в группе (1 пуша/мин)
+    MAX_MUTE_BYTES: 32768,   // 500 id × ~58 байт
   },
 
   ARCHIVIST: {

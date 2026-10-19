@@ -2,8 +2,9 @@ import * as lp from 'it-length-prefixed';
 import { pipe } from 'it-pipe';
 import { CONFIG } from '../config.js';
 import { generateAuthToken } from '../utils/crypto.js';
-import { savePushSubscription, removePushSubscription } from '../database/db.js';
-import { sendPushToTarget } from '../../services/pushSendService.js';
+import { savePushSubscription, removePushSubscription, setPushMuted } from '../database/db.js';
+import { sendPushToTarget, sendPushToGroup, claimGroupSender } from '../../services/pushSendService.js';
+import { canWrite, activeMemberIds } from '../../services/groupAccess.js';
 
 async function reply(stream, status) {
   try {
@@ -115,6 +116,79 @@ export function registerPushNotifyProtocol(node) {
       });
     } catch (err) {
       console.error('❌ [Push] Ошибка notify:', err.message);
+    }
+  }, { runOnTransientConnection: true });
+}
+
+const GROUP_ID_RE = /^grp_zdpu[1-9A-HJ-NP-Za-km-z]{40,60}$/;
+
+// УВЕДОМЛЕНИЕ ГРУППЫ: loadGroup(groupId) -> GroupState | null (оборачивает открытие управляющей БД на релее)
+export function registerPushNotifyGroupProtocol(node, loadGroup) {
+  node.handle(CONFIG.TOPICS.PUSH_NOTIFY_GROUP, async ({ stream, connection }) => {
+    const senderId = connection.remotePeer.toString();
+    try {
+      await pipe(stream.source, lp.decode, async function (source) {
+        for await (const chunk of source) {
+          if (chunk.length > CONFIG.PUSH.MAX_PAYLOAD_BYTES) return await reply(stream, CONFIG.MSG.FORBIDDEN);
+
+          const { groupId } = JSON.parse(new TextDecoder().decode(chunk.subarray()));
+          if (typeof groupId !== 'string' || !GROUP_ID_RE.test(groupId)) {
+            return await reply(stream, CONFIG.MSG.FORBIDDEN);
+          }
+
+          // дешёвая проверка до чтения БД; повтор в паузу не ошибка
+          if (!claimGroupSender(senderId, groupId)) return await reply(stream, CONFIG.MSG.SUCCESS);
+
+          const state = await loadGroup(groupId);
+          if (!state || !canWrite(state, senderId)) return await reply(stream, CONFIG.MSG.FORBIDDEN);
+
+          sendPushToGroup(groupId, senderId, activeMemberIds(state)).catch((err) =>
+            console.error('❌ [Push] Ошибка sendPushToGroup:', err.message)
+          );
+          await reply(stream, CONFIG.MSG.SUCCESS);
+          break;
+        }
+      });
+    } catch (err) {
+      console.error('❌ [Push] Ошибка group notify:', err.message);
+    }
+  }, { runOnTransientConnection: true });
+}
+
+// МЬЮТ: клиент присылает { muted: string[] }, пир берём из соединения
+export function registerPushMuteProtocol(node, pubsub) {
+  node.handle(CONFIG.TOPICS.PUSH_MUTE, async ({ stream, connection }) => {
+    const peerId = connection.remotePeer.toString();
+    try {
+      await pipe(stream.source, lp.decode, async function (source) {
+        for await (const chunk of source) {
+          if (chunk.length > CONFIG.PUSH.MAX_MUTE_BYTES) return await reply(stream, CONFIG.MSG.FORBIDDEN);
+
+          const { muted } = JSON.parse(new TextDecoder().decode(chunk.subarray()));
+          if (!Array.isArray(muted) || !muted.every((x) => typeof x === 'string' && x.length <= 128)) {
+            return await reply(stream, CONFIG.MSG.FORBIDDEN);
+          }
+
+          const records = setPushMuted(peerId, muted);
+          if (records.length === 0) return await reply(stream, CONFIG.MSG.FORBIDDEN); // нет активной подписки
+
+          for (const record of records) {
+            try {
+              const timestamp = Date.now();
+              const auth = generateAuthToken(timestamp, CONFIG.SECURITY.clusterSecret);
+              await pubsub.publish(
+                CONFIG.TOPICS.PUSH_LIVE_SYNC,
+                new TextEncoder().encode(JSON.stringify({ timestamp, auth, record }))
+              );
+            } catch { /* других релеев онлайн нет */ }
+          }
+
+          await reply(stream, CONFIG.MSG.SUCCESS);
+          break;
+        }
+      });
+    } catch (err) {
+      console.error('❌ [Push] Ошибка mute:', err.message);
     }
   }, { runOnTransientConnection: true });
 }

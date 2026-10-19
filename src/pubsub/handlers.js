@@ -210,7 +210,7 @@ export function setupPubSubHandlers(node, pubsub, archivistService = null, globa
       return;
     }
 
-        // ==========================================
+    // ==========================================
     // 🔔 ЖИВАЯ СИНХРОНИЗАЦИЯ PUSH-ПОДПИСОК
     // ==========================================
     if (topic === CONFIG.TOPICS.PUSH_LIVE_SYNC) {

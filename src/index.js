@@ -14,7 +14,7 @@ import { createCheckUploadHandler } from './routes/checkUpload.js';
 import { setupBanSyncProtocol, requestBanSync } from './networking/banSync.js';
 import { setupContactRequestSyncProtocol, requestContactRequestSync } from './networking/contactRequestSync.js';
 import { registerContactRequestProtocol, registerContactRequestFetchProtocol } from './networking/contactRequests.js';
-import { registerPushSubscribeProtocol, registerPushUnsubscribeProtocol, registerPushNotifyProtocol } from './networking/pushSubscriptions.js';
+import { registerPushSubscribeProtocol, registerPushUnsubscribeProtocol, registerPushNotifyProtocol, registerPushNotifyGroupProtocol, registerPushMuteProtocol } from './networking/pushSubscriptions.js';
 import { setupPushSyncProtocol, requestPushSync } from './networking/pushSync.js';
 import { createInternalBanRoutes } from './routes/internalBan.js';
 import { createRegisterFileHandler } from './routes/registerFile.js';
@@ -22,6 +22,7 @@ import { createDeleteFileHandler } from './routes/deleteFile.js';
 import { RateLimitedAccessController } from './access-controllers/rateLimitedAccessController.js';
 import { GroupAccessController } from './access-controllers/groupAccessController.js';
 import { setupGroupPingBridge } from './pubsub/groupPing.js';
+import { createGroupLoader } from '../services/groupAccess.js';
 
 async function main() {
   // Сначала поднимаем базу данных
@@ -105,6 +106,7 @@ async function main() {
   const timeoutMs = CONFIG.INACTIVITY_TIMEOUT_MS || 20 * 60 * 1000;
   // Передаем node и bootstrapList последними аргументами
   const archivist = new ArchivistService(heliaInstance, orbitdb, timeoutMs, node, bootstrapList);
+  const loadGroup = createGroupLoader(archivist);
   // Запускаем внутренний мониторинг комнат
   archivist.startMonitoring();
 
@@ -125,6 +127,9 @@ async function main() {
   registerPushNotifyProtocol(node);
   registerPushSubscribeProtocol(node, pubsub);
   registerPushUnsubscribeProtocol(node, pubsub);
+  // Подключаем слушатель запросов на пуш-уведомления
+  registerPushMuteProtocol(node, pubsub)
+  registerPushNotifyGroupProtocol(node, loadGroup)
 
   // ==========================================
   // НАСТРОЙКА GRACEFUL SHUTDOWN (БЕЗОПАСНОЕ ВЫКЛЮЧЕНИЕ)

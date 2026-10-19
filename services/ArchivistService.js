@@ -139,6 +139,10 @@ export class ArchivistService {
             });
             
             console.log(`✅ Успешно открыта: ${roomAddress}`);
+            if (db.access?.type === 'ychat-group') {
+              db.log.heads().then((h) => console.log(`🧾 [Group] ${roomAddress.slice(-12)} heads=${h.length}`)).catch(() => {});
+              db.events.on('update', (e) => console.log(`📥 [Group] update ${roomAddress.slice(-12)} ${e?.payload?.value?._id?.slice(0, 20)}`));
+            }
             // Принудительная репликация при каждом обновлении
             db.events.on('join', async (peerId) => {
               console.log(`JOIN ${roomAddress.slice(-12)} <- ${peerId.toString().slice(-12)}`);
@@ -149,7 +153,9 @@ export class ArchivistService {
             retries--;
             if (err.code === 'ERR_NOT_FOUND' || 
                 err.name === 'NotFoundError' || 
+                err.name === 'AggregateError' ||
                 err.message?.includes('not found') ||
+                err.message?.includes('All promises were rejected') ||
                 err.message?.includes('unexpected end of input')) {
               
               console.log(`⏳ Манифест/блоки ещё не пришли (${retries} попыток)...`);
@@ -193,6 +199,8 @@ export class ArchivistService {
           if (err.message?.includes('protocol selection failed')) {
             this.activeRooms.delete(roomAddress);
             try { await db.close(); } catch {}
+            console.warn(`🔁 [Архивариус] ${roomAddress.slice(-12)} закрыта (protocol selection failed), переоткрываю`);
+            setTimeout(() => this.pinRoom(roomAddress).catch(() => {}), 3000);
           }
         });
         
@@ -232,5 +240,14 @@ export class ArchivistService {
   // Какие комнаты сейчас на пиннинге
   getPinnedRooms() {
     return Array.from(this.activeRooms.keys());
+  }
+
+    // Уже запиненная БД (или открывающаяся прямо сейчас, ждём не дольше waitMs). Сама ничего не открывает.
+  async getPinnedRoom(roomAddress, waitMs = 5000) {
+    const db = this.activeRooms.get(roomAddress);
+    if (db) return db;
+    const opening = this.openingPromises.get(roomAddress);
+    if (!opening) return null;
+    return Promise.race([opening, new Promise((r) => setTimeout(() => r(null), waitMs))]);
   }
 }

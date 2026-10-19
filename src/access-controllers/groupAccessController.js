@@ -14,15 +14,15 @@ const MAX_ACT_BYTES = 2_048;
 // Должен совпадать с типами событий в groupState.ts (следующий шаг)
 const ACT_TYPES = new Set([
   'add', 'kick', 'ban', 'unban', 'role', 'write',
-  'leave', 'profile', 'group', 'del_msg', 'transfer', 'close', 'join',
+  'leave', 'profile', 'group', 'del_msg', 'transfer', 'close', 'join', 'day',
 ]);
 
-export const GroupAccessController = () => async (params) => {
+export const GroupAccessController = (opts = {}) => async (params) => {
   const { orbitdb, identities, address } = params;
 
   // IPFSAccessController хранит манифест { write: [owner] }: при создании owner = identity создателя,
   // при открытии по адресу читается из манифеста. Это и есть владелец группы (db.access.write[0]).
-  const base = await IPFSAccessController({ write: [orbitdb.identity.id] })({
+  const base = await IPFSAccessController({ write: [opts.owner ?? orbitdb.identity.id] })({
     ...params,
     address: address ? address.replace(OWN_PREFIX, IPFS_PREFIX) : undefined,
   });

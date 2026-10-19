@@ -75,6 +75,10 @@ export function initDatabase() {
 
   db.prepare(`CREATE INDEX IF NOT EXISTS idx_push_peer ON push_subscriptions(peer_id)`).run();
 
+  try {
+    db.prepare(`ALTER TABLE push_subscriptions ADD COLUMN muted_json TEXT NOT NULL DEFAULT '[]'`).run();
+  } catch { /* колонка уже есть */ }
+
   console.log('🗄️ [SQLite] База данных и индексы успешно инициализированы.');
 }
 
@@ -197,12 +201,12 @@ export function savePushSubscription(peerId, endpoint, subscriptionJson) {
 
   const updatedAt = Date.now();
   db.prepare(PUSH_UPSERT_SQL).run(peerId, endpoint, subscriptionJson, updatedAt);
-  return { peer_id: peerId, endpoint, subscription_json: subscriptionJson, status: 'active', updated_at: updatedAt };
+  return db.prepare(`SELECT * FROM push_subscriptions WHERE peer_id = ? AND endpoint = ?`).get(peerId, endpoint);
 }
 
 export function removePushSubscription(peerId, endpoint) {
   const existing = db.prepare(
-    `SELECT subscription_json FROM push_subscriptions WHERE peer_id = ? AND endpoint = ?`
+    `SELECT subscription_json, muted_json FROM push_subscriptions WHERE peer_id = ? AND endpoint = ?`
   ).get(peerId, endpoint);
 
   const updatedAt = Date.now();
@@ -211,13 +215,23 @@ export function removePushSubscription(peerId, endpoint) {
     WHERE peer_id = ? AND endpoint = ?
   `).run(updatedAt, peerId, endpoint);
 
-  return { peer_id: peerId, endpoint, subscription_json: existing?.subscription_json || '', status: 'removed', updated_at: updatedAt };
+  return { peer_id: peerId, endpoint, subscription_json: existing?.subscription_json || '', muted_json: existing?.muted_json || '[]', status: 'removed', updated_at: updatedAt };
 }
 
 export function getPushSubscriptionsFor(peerId) {
   return db.prepare(
-    `SELECT endpoint, subscription_json FROM push_subscriptions WHERE peer_id = ? AND status = 'active'`
+    `SELECT endpoint, subscription_json, muted_json FROM push_subscriptions WHERE peer_id = ? AND status = 'active'`
   ).all(peerId);
+}
+
+// Перезаписывает список выключенных чатов на всех устройствах пира.
+// Возвращает записи для live-sync (как savePushSubscription).
+export function setPushMuted(peerId, muted) {
+  const list = [...new Set((muted || []).filter((x) => typeof x === 'string'))].slice(0, CONFIG.PUSH.MAX_MUTED);
+  db.prepare(
+    `UPDATE push_subscriptions SET muted_json = ?, updated_at = ? WHERE peer_id = ? AND status = 'active'`
+  ).run(JSON.stringify(list), Date.now(), peerId);
+  return db.prepare(`SELECT * FROM push_subscriptions WHERE peer_id = ? AND status = 'active'`).all(peerId);
 }
 
 // Для bulk-синхронизации между релеями — отдаём ВСЕ строки (active и removed)
@@ -229,12 +243,13 @@ export function mergePushSubscriptions(records) {
   if (!records || records.length === 0) return 0;
 
   const upsert = db.prepare(`
-    INSERT INTO push_subscriptions (peer_id, endpoint, subscription_json, status, updated_at)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT INTO push_subscriptions (peer_id, endpoint, subscription_json, status, updated_at, muted_json)
+    VALUES (?, ?, ?, ?, ?, ?)
     ON CONFLICT(peer_id, endpoint) DO UPDATE SET
       subscription_json = excluded.subscription_json,
       status = excluded.status,
-      updated_at = excluded.updated_at
+      updated_at = excluded.updated_at,
+      muted_json = excluded.muted_json
     WHERE excluded.updated_at > push_subscriptions.updated_at
   `);
 
@@ -242,7 +257,7 @@ export function mergePushSubscriptions(records) {
     let applied = 0;
     for (const row of rows) {
       if (!row.peer_id || !row.endpoint || !row.status || !row.updated_at) continue;
-      const result = upsert.run(row.peer_id, row.endpoint, row.subscription_json || '', row.status, row.updated_at);
+      const result = upsert.run(row.peer_id, row.endpoint, row.subscription_json || '', row.status, row.updated_at, row.muted_json || '[]');
       if (result.changes > 0) applied++;
     }
     return applied;
