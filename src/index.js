@@ -24,6 +24,12 @@ import { GroupAccessController } from './access-controllers/groupAccessControlle
 import { setupGroupPingBridge } from './pubsub/groupPing.js';
 import { createGroupLoader } from '../services/groupAccess.js';
 
+// Время (UTC) в каждой строке лога
+for (const level of ['log', 'warn', 'error']) {
+  const orig = console[level].bind(console);
+  console[level] = (...args) => orig(new Date().toISOString().slice(11, 23), ...args);
+}
+
 async function main() {
   // Сначала поднимаем базу данных
   initDatabase();
@@ -172,7 +178,7 @@ async function main() {
   await safeSubscribe(pubsub, CONFIG.TOPICS.CONTACT_REQUEST_LIVE_SYNC);
   await safeSubscribe(pubsub, CONFIG.TOPICS.PUSH_LIVE_SYNC);
   // Ping-топики групп: релей подписывается на них, пока есть подписанные клиенты
-  setupGroupPingBridge(pubsub, (id) => bootstrapList.some((addr) => addr.includes(id)));
+  setupGroupPingBridge(pubsub, (id) => bootstrapList.some((addr) => addr.includes(id)), archivist);
 
   let syncCompleted = false;
 

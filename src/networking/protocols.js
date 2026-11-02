@@ -177,7 +177,7 @@ export async function registerAnnounceProtocol(node, archivist, pendingRequests)
                 const now = Date.now();
                 if (pendingRequests.has(targetAddress)) {
                   const lastSeen = pendingRequests.get(targetAddress);
-                  if (now - lastSeen < CONFIG.DELAY_START_MS) return;  
+                  if (now - lastSeen < CONFIG.DELAY_START_MS) continue;
                 }
 
                 pendingRequests.set(targetAddress, now);
@@ -198,8 +198,12 @@ export async function registerAnnounceProtocol(node, archivist, pendingRequests)
       );
     } catch (err) {
       console.error(`❌ [Protocol] Ошибка стрима: ${err.message}`);
+    } finally {
+      // Без этого поток остаётся полуоткрытым и занимает слот maxInboundStreams (по умолчанию 32) на соединение
+      await stream.close().catch(() => stream.abort(new Error('announce done')));
     }
   }, {
-    runOnTransientConnection: true
+    runOnTransientConnection: true,
+    maxInboundStreams: 256, // запас: клиент анонсирует по 15–20 баз за раз при каждом пробуждении
   });
 }

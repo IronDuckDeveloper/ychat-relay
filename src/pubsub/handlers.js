@@ -271,10 +271,7 @@ export function setupPubSubHandlers(node, pubsub, archivistService = null, globa
     }
 
       // Обычные сообщения (чат)
-    if (topic.includes('/orbitdb/')) {
-      console.log(`📩 [${topic}] Скрытое сообщение от ${from.toString().slice(-12)}: ${extractMessagePreview(text)}`);
-      return;
-    }
+    if (topic.includes('/orbitdb/')) return; // heads-обмен OrbitDB: бинарный мусор, в лог не пишем
     // Обычные сообщения (чат)
     if (!topic.includes('sync')) {
       console.log(`📩 [${topic}] Сообщение от ${from.toString().slice(-12)}: ${extractMessagePreview(text)}`);

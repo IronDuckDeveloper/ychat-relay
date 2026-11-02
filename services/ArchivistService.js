@@ -23,6 +23,9 @@ export class ArchivistService {
 
     this.monitorInterval = null;
 
+    this.lastSubs = new Map();
+    this.lastStatus = '';
+
     console.log('🛡️ ArchivistService инициализирован');
   }
 
@@ -53,6 +56,11 @@ export class ArchivistService {
           !bootstrapPeerIds.includes(peer.toString())
         );
 
+        const sig = clientSubscribers.map(p => p.toString().slice(-6)).sort().join(',');
+        if (this.lastSubs.get(roomAddress) !== sig) {
+          this.lastSubs.set(roomAddress, sig);
+        }
+
         // Проверяем именно ЖИВЫХ КЛИЕНТОВ (браузеры)
         if (clientSubscribers.length === 0) {
           if (!this.roomTimers.has(roomAddress)) {
@@ -72,7 +80,8 @@ export class ArchivistService {
       const activeCount = this.activeRooms.size;
       const timersCount = this.roomTimers.size;
       
-      console.log(`📊 Сеть: Пиров=${totalPeers} | Комнат=${activeCount} | На удаление⏳=${timersCount}`);
+      const line = `📊 Сеть: Пиров=${totalPeers} | Комнат=${activeCount} | На удаление⏳=${timersCount}`;
+      if (line !== this.lastStatus) { this.lastStatus = line; console.log(line); }
     }, 15000); // 15 секунд
   }
 
@@ -141,8 +150,8 @@ export class ArchivistService {
             console.log(`✅ Успешно открыта: ${roomAddress}`);
             if (db.access?.type === 'ychat-group') {
               db.log.heads().then((h) => console.log(`🧾 [Group] ${roomAddress.slice(-12)} heads=${h.length}`)).catch(() => {});
-              db.events.on('update', (e) => console.log(`📥 [Group] update ${roomAddress.slice(-12)} ${e?.payload?.value?._id?.slice(0, 20)}`));
             }
+            db.events.on('update', (e) => console.log(`📥 update ${roomAddress.slice(-12)} ${e?.payload?.value?._id?.slice(0, 20)}`));
             // Принудительная репликация при каждом обновлении
             db.events.on('join', async (peerId) => {
               console.log(`JOIN ${roomAddress.slice(-12)} <- ${peerId.toString().slice(-12)}`);
@@ -191,17 +200,12 @@ export class ArchivistService {
             console.warn(`⚠️ Ожидаемая сетевая ошибка в ${roomAddress.slice(-12)}`);
             return;
           }
-          console.error(`[OrbitDB Error] ${roomAddress.slice(-12)}:`, err.message);
-
-          // Зомби-соединение к пиру: OrbitDB продолжает стучаться по мёртвому стриму.
-          // Выкидываем из кэша, чтобы следующий pinRoom() открыл БД заново, а не вернул
-          // протухший инстанс
+          // отказ одного пира (у него БД уже закрыта): БД не трогаем, иначе рвётся синк с остальными
           if (err.message?.includes('protocol selection failed')) {
-            this.activeRooms.delete(roomAddress);
-            try { await db.close(); } catch {}
-            console.warn(`🔁 [Архивариус] ${roomAddress.slice(-12)} закрыта (protocol selection failed), переоткрываю`);
-            setTimeout(() => this.pinRoom(roomAddress).catch(() => {}), 3000);
+            console.warn(`⚠️ [Архивариус] ${roomAddress.slice(-12)}: пир без протокола БД`);
+            return;
           }
+          console.error(`[OrbitDB Error] ${roomAddress.slice(-12)}:`, err.message);
         });
         
         return db;
